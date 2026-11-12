@@ -1,0 +1,355 @@
+// buckram's file and process tools: the jobs that, without a shell, took a
+// program written, built and run for each (the 'rain compiler's question
+// 693). A path is the project's, unless it's whole.
+//
+//   files      list a folder (sizes and dates; all of it beneath with all),
+//              copy or move a file or folder, delete files and folders
+//              (clearing read-only first)
+//   processes  list the running processes (named like name), or end them
+//              by name or ID: never buckram, or what started it
+
+#import "String"
+#import "File"
+#import "Json"
+OS :: #import "OS_Windows"
+
+files_tool :: (out: *[..] u8, arguments: Json) {
+    operation := text_member(arguments, "operation")
+    if operation == "list" { list_files(out, arguments); return }
+    if operation == "copy" { copy_or_move(out, arguments, false); return }
+    if operation == "move" { copy_or_move(out, arguments, true); return }
+    if operation == "delete" { delete_paths(out, arguments); return }
+    tool_result(out, "files does list, copy, move or delete (as operation), not '«operation»'", true)
+}
+
+// A member that's true, or false.
+bool_member :: (value: Json, name: string -> bool) {
+    if found := member(value, name) {
+        if found is boolean then return boolean
+        return false
+    } else if absent {
+        return false
+    }
+}
+
+//- list
+
+list_files :: (out: *[..] u8, arguments: Json) {
+    *given := text_member(arguments, "path")
+    if given == "" then given = "."
+    folder := in_project(given)
+    everything := bool_member(arguments, "all")
+    if entries := entries_of(folder, everything) is {
+        case absent:
+            tool_result(out, "there's no folder «given»", true)
+        case os_error:
+            tool_result(out, "«given» can't be listed («os_error»)", true)
+    } else {
+        *text: [..] u8
+        *files := 0
+        *folders := 0
+        *bytes: u64 = 0
+        for entry: entries {
+            // Its path in the folder listed.
+            *place := entry.name
+            if everything and entry.path.count > folder.count then place = trim_start_any(entry.path[folder.count:], "/\\")
+            if entry.is_folder {
+                append(text, "-\t«entry.modified»\t«place»/\n")
+                folders += 1
+            } else {
+                append(text, "«entry.size»\t«entry.modified»\t«place»\n")
+                files += 1
+                bytes += entry.size
+            }
+        }
+        append(text, "«files» file«plural(files)» («bytes» bytes), «folders» folder«plural(folders)», in «given»")
+        tool_result(out, limited("files", string'text), false)
+    }
+}
+
+// A folder's entries, or with everything all beneath it.
+entries_of :: (folder: string, everything: bool -> entries: [] Entry) [absent, os_error: OS.Windows_Error] {
+    entries = ⟨⟩
+    if everything {
+        if found := all_files(folder) { entries = found } else if absent { fail: absent } else if os_error { fail: os_error = os_error }
+    } else {
+        if found := files_in(folder) { entries = found } else if absent { fail: absent } else if os_error { fail: os_error = os_error }
+    }
+}
+
+//- copy and move
+
+copy_or_move :: (out: *[..] u8, arguments: Json, moving: bool) {
+    *verb := "copy"
+    if moving then verb = "move"
+    from_given := text_member(arguments, "from")
+    to_given := text_member(arguments, "to")
+    if from_given == "" or to_given == "" {
+        tool_result(out, "«verb» needs from and to: the path there now, and where it goes", true)
+        return
+    }
+    from := in_project(from_given)
+    to := in_project(to_given)
+    if !file_exists(from) and !folder_exists(from) {
+        tool_result(out, "there's nothing at «from_given» to «verb»", true)
+        return
+    }
+    if moving {
+        why := kept_whole(from)
+        if why != "" {
+            tool_result(out, "«from_given» «why»: left where it is", true)
+            return
+        }
+    }
+    make_folder_for(to)
+    if moving {
+        if rename_file(from, to) is {
+            case absent:
+                tool_result(out, "there's nothing at «from_given» to move", true)
+            case os_error:
+                tool_result(out, "«from_given» can't be moved to «to_given» («os_error»)", true)
+        } else {
+            tool_result(out, "moved «from_given» to «to_given»", false)
+        }
+        return
+    }
+    if folder_exists(from) {
+        if count := copy_folder(from, to) {
+            tool_result(out, "copied «from_given» to «to_given»: «count» file«plural(count)»", false)
+        } else if os_error {
+            tool_result(out, "«from_given» can't all be copied to «to_given» («os_error»): what was copied before stays", true)
+        }
+        return
+    }
+    clear_read_only(to)
+    if copy_file(from, to) is {
+        case absent:
+            tool_result(out, "there's nothing at «from_given» to copy", true)
+        case os_error:
+            tool_result(out, "«from_given» can't be copied to «to_given» («os_error»)", true)
+    } else {
+        tool_result(out, "copied «from_given» to «to_given»", false)
+    }
+}
+
+// The folders on the way to a path, made if they aren't there.
+make_folder_for :: (path: string) {
+    folder := folder_of(path)
+    if folder != "" and !folder_exists(folder) {
+        if create_folder(folder) is os_error { }
+    }
+}
+
+// A folder and all beneath it, copied (replacing files of the same name):
+// how many files.
+copy_folder :: (from: string, to: string -> count: i64) [os_error: OS.Windows_Error] {
+    count = 0
+    if create_folder(to) is os_error { fail: os_error = os_error }
+    if entries := all_files(from) {
+        for entry: entries {
+            target := join_path(to, trim_start_any(entry.path[from.count:], "/\\"))
+            if entry.is_folder {
+                if create_folder(target) is os_error { fail: os_error = os_error }
+            } else {
+                clear_read_only(target)
+                if copy_file(entry.path, target) { count += 1 } else if absent { } else if os_error { fail: os_error = os_error }
+            }
+        }
+    } else if absent {
+    } else if os_error {
+        fail: os_error = os_error
+    }
+}
+
+// A read-only file made writable (as Perforce leaves files), so it can be
+// replaced or deleted.
+clear_read_only :: (path: string) {
+    if attributes := OS.file_attributes(path) is not absent or os_error {
+        if attributes & .READONLY == .READONLY {
+            if OS.set_file_attributes(path, .NORMAL) is absent or os_error { }
+        }
+    }
+}
+
+//- delete
+
+delete_paths :: (out: *[..] u8, arguments: Json) {
+    paths := texts_member(arguments, "paths")
+    if paths.count == 0 {
+        tool_result(out, "delete needs paths: a list of the files and folders to delete", true)
+        return
+    }
+    *text: [..] u8
+    *failed := false
+    for given: paths {
+        path := in_project(given)
+        why := kept_whole(path)
+        if why != "" {
+            append(text, "«given» «why»: left alone\n")
+            failed = true
+            continue
+        }
+        if folder_exists(path) {
+            if count := delete_everything(path) {
+                append(text, "deleted «given»/ («count» file«plural(count)»)\n")
+            } else if os_error {
+                append(text, "«given»/ can't all be deleted («os_error»)\n")
+                failed = true
+            }
+            continue
+        }
+        clear_read_only(path)
+        if delete_file(path) is {
+            case absent:
+                append(text, "«given» wasn't there\n")
+            case os_error:
+                append(text, "«given» can't be deleted («os_error»)\n")
+                failed = true
+        } else {
+            append(text, "deleted «given»\n")
+        }
+    }
+    tool_result(out, string'text, failed)
+}
+
+// Why a path mustn't be deleted or moved away (it's the project's folder,
+// holds it, or is a drive), or "". By full paths, so ".", ".." and the
+// way it's written don't matter.
+kept_whole :: (path: string -> string) {
+    whole := comparable_path(path)
+    project := comparable_path(config.folder)
+    if whole.count <= 2 then return "is a drive"
+    if whole == project then return "is the project's folder"
+    if starts_with(project, "«whole»/") then return "holds the project's folder"
+    return ""
+}
+
+// A path made whole, with /, no / at its end, in lower case.
+comparable_path :: (path: string -> string) {
+    *whole := path
+    if full := full_path(path) { whole = full } else if os_error { }
+    return to_lower(trim_end_any(replace(whole, "\\", "/"), "/"))
+}
+
+// A folder and everything in it, its read-only files included: how many
+// files.
+delete_everything :: (folder: string -> count: i64) [os_error: OS.Windows_Error] {
+    count = 0
+    if entries := all_files(folder) {
+        for entry: entries {
+            if entry.is_folder then continue
+            clear_read_only(entry.path)
+            count += 1
+        }
+    } else if absent {
+    } else if os_error {
+        fail: os_error = os_error
+    }
+    if delete_folder(folder, true) is {
+        case absent:
+        case os_error:
+            fail: os_error = os_error
+    }
+}
+
+//- processes
+
+processes_tool :: (out: *[..] u8, arguments: Json) {
+    operation := text_member(arguments, "operation")
+    if operation != "list" and operation != "end" {
+        tool_result(out, "processes does list or end (as operation), not '«operation»'", true)
+        return
+    }
+    *processes: [] OS.Process_Entry
+    if found := OS.process_snapshot() {
+        processes = found
+    } else if os_error {
+        tool_result(out, "the processes can't be listed («os_error»)", true)
+        return
+    }
+    name := text_member(arguments, "name")
+    if operation == "list" {
+        *text: [..] u8
+        *shown := 0
+        for p: processes {
+            if !named_like(p.exe_name, name) then continue
+            append(text, "«p.id»\t«p.parent_id»\t«p.exe_name»\n")
+            shown += 1
+        }
+        *which := ""
+        if name != "" then which = " named like «name»"
+        append(text, "«shown» process«plural_es(shown)»«which» (id, parent, program)")
+        tool_result(out, limited("processes", string'text), false)
+        return
+    }
+    *ids: [..] i64
+    if given := member(arguments, "ids") is not absent {
+        if given is list {
+            for item: list {
+                if item is number {
+                    if n := to_i64(number) { ids.add(n) } else if invalid or too_big { }
+                }
+            }
+        }
+    }
+    if name == "" and ids.count == 0 {
+        tool_result(out, "end needs a name (its program's, such as rain.exe) or ids", true)
+        return
+    }
+    // buckram, and every process above it (the stub, the agent's client):
+    // ending one would end the session asking.
+    *kept: [..] u32
+    *at := OS.current_process_id()
+    *depth := 0
+    while at != 0 and depth < 32 {
+        kept.add(at)
+        *parent: u32 = 0
+        for p: processes { if p.id == at then parent = p.parent_id }
+        at = parent
+        depth += 1
+    }
+    *text: [..] u8
+    *ended := 0
+    *failed := false
+    for p: processes {
+        id := i64'(p.id)
+        *picked := name != "" and equal(p.exe_name, name, .IGNORING_CASE)
+        for wanted: ids { if wanted == id then picked = true }
+        if !picked then continue
+        *runs_buckram := false
+        for k: kept { if k == p.id then runs_buckram = true }
+        if runs_buckram {
+            append(text, "«p.exe_name» («p.id») is buckram, or runs it: left running\n")
+            continue
+        }
+        if process := OS.open_process(p.id, .TERMINATE) {
+            if OS.terminate_process(process) {
+                append(text, "ended «p.exe_name» («p.id»)\n")
+                ended += 1
+            } else if os_error {
+                append(text, "«p.exe_name» («p.id») can't be ended («os_error»)\n")
+                failed = true
+            }
+            OS.close_handle(process)
+        } else if os_error {
+            append(text, "«p.exe_name» («p.id») can't be opened to end it («os_error»)\n")
+            failed = true
+        }
+    }
+    if ended == 0 and !failed then append(text, "no process ended: none is named «name», or has those ids\n")
+    tool_result(out, string'text, failed)
+}
+
+// Does the program's name contain the name given (any case)? Any does, for
+// none.
+named_like :: (exe_name: string, name: string -> bool) {
+    if name == "" then return true
+    if _ := first_index(exe_name, name, 0, .IGNORING_CASE) is not absent then return true
+    return false
+}
+
+// "es" after a count other than 1.
+plural_es :: (n: i64 -> string) {
+    if n == 1 then return ""
+    return "es"
+}

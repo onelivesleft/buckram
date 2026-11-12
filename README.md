@@ -27,6 +27,14 @@ is downloaded: nothing needs building first.
 - **edit**: exact replacements in files, all or none. Each edit's old text
   must be in its file exactly `count` times (1 by default); if any isn't,
   nothing is written. An empty old text makes a new file.
+- **files**: list a folder (each entry's size, when it was last written,
+  and its name; `all` for everything beneath it), copy or move a file or a
+  whole folder, and delete files and folders, read-only ones included (as
+  Perforce leaves them). It won't delete or move away the project's folder,
+  one holding it, or a drive.
+- **processes**: list the running processes (those whose program's name
+  contains `name`), or end them by program name or ID. buckram, and what
+  started it (the agent's own client), are never ended.
 - **the project's tasks**, from its `buckram.json` (below): each a tool.
 - **task**: runs a task by name, for one added since the client last
   listed the tools.

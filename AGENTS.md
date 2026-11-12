@@ -26,6 +26,14 @@ do; in short:
   more arguments as a list. Give a commit's message as `message`, exactly
   as it should be: it goes to git as its input. Nothing that rewrites or
   discards history or work is offered; ask the person to do that.
+- **`files`** to list, copy, move or delete files and folders, rather than
+  a program written for it: `operation` `list` (`path`, `all`), `copy` or
+  `move` (`from`, `to`: a file or a whole folder), `delete` (`paths`; a
+  folder goes with everything in it, read-only files too). It refuses the
+  project's folder, one holding it, and drives.
+- **`processes`** to `list` the running processes (`name` filters them)
+  or `end` some (`name`, a program such as `rain.exe`, or `ids`); never
+  buckram or what started it.
 - **`edit`** for several exact replacements that must all happen or none:
   each edit's old text must be in its file exactly `count` times (1 by
   default). An empty old text makes a new file.
@@ -100,7 +108,8 @@ A tool's result is an error when its program exits with a code other than
 
 ## Working on buckram
 
-- **The files:** [src/stub.rain](src/stub.rain) is the stub
+- **The files:** [src/files.rain](src/files.rain) has the `files` and
+  `processes` tools. [src/stub.rain](src/stub.rain) is the stub
   (`bin/buckram.exe`), which the client starts and keeps running: it
   answers `initialize`, and for every other message starts
   `bin/buckram_core.exe` afresh in the project's folder with the message as

@@ -16,6 +16,8 @@
 //   git          status, diff, log, show, add and commit (a commit's message
 //                is given as text, never on a command line)
 //   edit         exact replacements in files, all or none
+//   files        list, copy, move and delete files and folders (files.rain)
+//   processes    list running processes, or end them (files.rain)
 //   task         a task of buckram.json's by name (one added since the
 //                client last listed the tools included)
 //   add_task     adds (or replaces) a task in buckram.json
@@ -54,11 +56,13 @@
 #import "Json"
 #import "Time"
 
+#load "files.rain"
+
 VERSION :: "0.1.0"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
 DEFAULT_TIMEOUT : f64 : 600
 GIT_COMMANDS :: [] string ⟨"status", "diff", "log", "show", "add", "commit"⟩
-OWN_TOOLS :: [] string ⟨"run", "git", "edit", "task", "add_task", "remove_task"⟩
+OWN_TOOLS :: [] string ⟨"run", "git", "edit", "files", "processes", "task", "add_task", "remove_task"⟩
 CONFIG_FILE :: "buckram.json"
 
 Takes :: enum { NONE; LIST }
@@ -249,6 +253,12 @@ list_tools :: (out: *[..] u8) {
     tool(out, "edit", #"Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text ("") that doesn't exist is made with new as its contents. Paths are the project's."#,
          #"{"type":"object","properties":{"edits":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"},"count":{"type":"integer"}},"required":["file","old","new"]}}},"required":["edits"]}"#)
     append(out, ",")
+    tool(out, "files", #"Files and folders, with no program to write: list (path, the project's folder by default: each entry's size, when it was last written, and its name; all: true for everything beneath it too), copy or move (from, to: a file, or a folder and all in it; files there are replaced, and the folders on the way made), and delete (paths: files, or folders with everything in them; read-only files are made writable first). Paths are the project's unless whole."#,
+         #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","copy","move","delete"]},"path":{"type":"string"},"all":{"type":"boolean"},"from":{"type":"string"},"to":{"type":"string"},"paths":«ARGUMENTS_SCHEMA»},"required":["operation"]}"#)
+    append(out, ",")
+    tool(out, "processes", #"The running processes: list (each one's id, its parent's, and its program; name to show only those whose program's name contains it), or end (name: every process of that program, such as rain.exe; or ids). buckram, and what started it (the agent's own client), are never ended."#,
+         #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","end"]},"name":{"type":"string"},"ids":{"type":"array","items":{"type":"integer"}}},"required":["operation"]}"#)
+    append(out, ",")
     *names: [..] u8
     for task, i: config.tasks {
         if i > 0 then append(names, ", ")
@@ -317,6 +327,8 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
     if name == "run" { run_tool(out, arguments); return }
     if name == "git" { git_tool(out, arguments); return }
     if name == "edit" { edit_tool(out, arguments); return }
+    if name == "files" { files_tool(out, arguments); return }
+    if name == "processes" { processes_tool(out, arguments); return }
     if name == "add_task" { add_task_tool(out, arguments); return }
     if name == "remove_task" { remove_task_tool(out, arguments); return }
     if name == "task" {
