@@ -1,0 +1,3 @@
+# LF line endings everywhere, in the repository and in working copies,
+# regardless of anyone's core.autocrlf setting ('rain rejects a CR).
+* text=auto eol=lf
