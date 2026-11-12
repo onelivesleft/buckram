@@ -7,6 +7,8 @@ backslashes collapse, `$` expands, quotes nest, `&&` isn't there, encodings
 change. buckram's tools take JSON instead, and run each program with its
 arguments as a list, so what the agent writes arrives as it is.
 
+An agent setting it up, or working on it, reads [AGENTS.md](AGENTS.md).
+
 Written in 'rain, a systems language for agents to write: the stub,
 [buckram.rain](buckram.rain); the tools, [core.rain](core.rain); and its
 build, [build.rain](build.rain).
