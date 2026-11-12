@@ -19,16 +19,16 @@ main :: (args: [] string) [failed: string] {
     *compiler := "rain"
     if args.count > 1 then compiler = args[1]
     *here := current_folder()
-    if whole := full_path(args[0]) { here = folder_of(whole) } else if os_error { }
+    if whole := full_path(args[0]) is not os_error { here = folder_of(whole) }
     old := join_path(here, "build/old_exes")
     if create_folder(old) is os_error { fail: failed = "build/old_exes can't be made («os_error»)" }
     // The ones no longer running go (one still running can't be deleted).
-    if entries := files_in(old) {
+    if entries := files_in(old) is not absent or os_error {
         for entry: entries {
             if entry.is_folder then continue
             if delete_file(entry.path) is absent or os_error { }
         }
-    } else if absent or os_error { }
+    }
     if build_one(compiler, here, old, "buckram.rain", "buckram.exe") is failed { fail: failed = failed }
     if build_one(compiler, here, old, "core.rain", "buckram_core.exe") is failed { fail: failed = failed }
 }

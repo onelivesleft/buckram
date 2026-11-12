@@ -102,15 +102,15 @@ load_config :: (-> loaded: Config) {
     *tasks: [..] Task
     if contents := read_file(join_path(loaded.folder, CONFIG_FILE)) {
         if value := parse_json(contents) {
-            if limit := member(value, "output_limit") {
+            if limit := member(value, "output_limit") is not absent {
                 if limit is number {
                     if n := to_i64(number) { if n > 64 then loaded.output_limit = n } else if invalid or too_big { log("output_limit isn't a whole number") }
                 }
-            } else if absent { }
-            if folder := member(value, "output_folder") {
+            }
+            if folder := member(value, "output_folder") is not absent {
                 if folder is text { loaded.output_folder = text }
-            } else if absent { }
-            if declared := member(value, "tasks") {
+            }
+            if declared := member(value, "tasks") is not absent {
                 if declared is object {
                     for name, i: object.names {
                         if is_own_tool(name) {
@@ -120,7 +120,7 @@ load_config :: (-> loaded: Config) {
                         if task := read_task(name, object.values[i]) { tasks.add(task) } else if bad_task { log("the task '«name»': «bad_task»") }
                     }
                 }
-            } else if absent { }
+            }
         } else if bad_json {
             log("buckram.json isn't JSON (at byte «bad_json.at»: «bad_json.why»), so it has no tasks")
         }
@@ -137,23 +137,23 @@ read_task :: (name: string, value: Json -> task: Task) [bad_task: string] {
     task.timeout = DEFAULT_TIMEOUT
     task.description = text_member(value, "description")
     *command: [..] string
-    if run := member(value, "run") {
+    if run := member(value, "run") is not absent {
         if run is list {
             for piece: list {
                 if piece is text { command.add(text) } else { fail: bad_task = "its run is a list of strings, the program first" }
             }
         }
-    } else if absent { }
+    }
     if command.count == 0 then fail: bad_task = "it needs a run: the program and its arguments, as a list of strings"
     task.command = command
     takes := text_member(value, "arguments")
     if takes == "list" { task.takes = .LIST }
     else if takes != "" and takes != "none" { fail: bad_task = "its arguments is \"none\" or \"list\"" }
-    if timeout := member(value, "timeout") {
+    if timeout := member(value, "timeout") is not absent {
         if timeout is number {
-            if t := to_f64(number) { task.timeout = t } else if invalid { }
+            if t := to_f64(number) is not invalid { task.timeout = t }
         }
-    } else if absent { }
+    }
 }
 
 // A member that's a string, or "".
@@ -187,13 +187,13 @@ handle :: (line: string) {
         method := text_member(request, "method")
         *id: Json
         *has_id := false
-        if given := member(request, "id") {
+        if given := member(request, "id") is not absent {
             id = given
             has_id = true
-        } else if absent { }
+        }
         if !has_id then return        // a notification (notifications/initialized, ...): nothing to answer
         *params: Json
-        if p := member(request, "params") { params = p } else if absent { }
+        if p := member(request, "params") is not absent { params = p }
         *result: [..] u8
         if method == "tools/list" {
             list_tools(result)
@@ -284,7 +284,7 @@ tool :: (out: *[..] u8, name: string, description: string, schema: string) {
 call_tool :: (out: *[..] u8, params: Json) {
     name := text_member(params, "name")
     *arguments: Json
-    if given := member(params, "arguments") { arguments = given } else if absent { }
+    if given := member(params, "arguments") is not absent { arguments = given }
     if name == "run" { run_tool(out, arguments); return }
     if name == "git" { git_tool(out, arguments); return }
     if name == "edit" { edit_tool(out, arguments); return }
@@ -438,18 +438,18 @@ add_task_tool :: (out: *[..] u8, arguments: Json) {
         names.add("arguments")
         values.add(Json.text("list"))
     }
-    if t := member(arguments, "timeout") {
+    if t := member(arguments, "timeout") is not absent {
         if t is number {
             names.add("timeout")
             values.add(t)
         }
-    } else if absent { }
+    }
     task := Json.object(⟨names, values⟩)
     *replaced := false
     for existing: config.tasks { if existing.name == name then replaced = true }
     if file := read_config_file() {
         *tasks := Json_Object⟨⟩
-        if listed := member(file, "tasks") { tasks = as_object(listed) } else if absent { }
+        if listed := member(file, "tasks") is not absent { tasks = as_object(listed) }
         updated := Json.object(with_member(as_object(file), "tasks", Json.object(with_member(tasks, name, task, false)), false))
         if write_config_file(updated) is bad_config {
             tool_result(out, bad_config, true)
@@ -474,7 +474,7 @@ remove_task_tool :: (out: *[..] u8, arguments: Json) {
     }
     if file := read_config_file() {
         *tasks := Json_Object⟨⟩
-        if listed := member(file, "tasks") { tasks = as_object(listed) } else if absent { }
+        if listed := member(file, "tasks") is not absent { tasks = as_object(listed) }
         updated := Json.object(with_member(as_object(file), "tasks", Json.object(with_member(tasks, name, ⟨⟩, true)), false))
         if write_config_file(updated) is bad_config {
             tool_result(out, bad_config, true)
@@ -496,9 +496,9 @@ run_tool :: (out: *[..] u8, arguments: Json) {
     *folder := text_member(arguments, "folder")
     if folder == "" { folder = config.folder } else { folder = in_project(folder) }
     *timeout := DEFAULT_TIMEOUT
-    if t := member(arguments, "timeout") {
-        if t is number { if seconds := to_f64(number) { timeout = seconds } else if invalid { } }
-    } else if absent { }
+    if t := member(arguments, "timeout") is not absent {
+        if t is number { if seconds := to_f64(number) is not invalid { timeout = seconds } }
+    }
     run_program(out, "run", ⟨folder: folder, input: text_member(arguments, "input"), timeout: timeout⟩, program, texts_member(arguments, "arguments"))
 }
 
@@ -551,17 +551,17 @@ Changed :: struct {
 
 edit_tool :: (out: *[..] u8, arguments: Json) {
     *edits: [..] Edit
-    if given := member(arguments, "edits") {
+    if given := member(arguments, "edits") is not absent {
         if given is list {
             for item: list {
                 *e := Edit⟨text_member(item, "file"), text_member(item, "old"), text_member(item, "new"), 1⟩
-                if c := member(item, "count") {
-                    if c is number { if n := to_i64(number) { e.count = n } else if invalid or too_big { } }
-                } else if absent { }
+                if c := member(item, "count") is not absent {
+                    if c is number { if n := to_i64(number) is not invalid or too_big { e.count = n } }
+                }
                 edits.add(e)
             }
         }
-    } else if absent { }
+    }
     if edits.count == 0 {
         tool_result(out, "edit needs edits: a list of {file, old, new}", true)
         return

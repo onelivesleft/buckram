@@ -47,7 +47,7 @@ main :: (args: [] string) {
     // The core is beside this program (its path made whole before the
     // folder changes).
     *own := args[0]
-    if whole := full_path(own) { own = whole } else if os_error { }
+    if whole := full_path(own) is not os_error { own = whole }
     core = join_path(folder_of(own), CORE)
     if args.count > 1 {
         if set_current_folder(args[1]) {
@@ -102,14 +102,14 @@ handle :: (line: string) {
     *has_id := false
     *params: Json
     if request := parse_json(line) {
-        if m := member(request, "method") {
+        if m := member(request, "method") is not absent {
             if m is text { method = text }
-        } else if absent { }
-        if given := member(request, "id") {
+        }
+        if given := member(request, "id") is not absent {
             id = given
             has_id = true
-        } else if absent { }
-        if p := member(request, "params") { params = p } else if absent { }
+        }
+        if p := member(request, "params") is not absent { params = p }
     } else if bad_json {
         respond_error(Json.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
         return
@@ -147,9 +147,9 @@ tools_changed :: () {
 
 initialize :: (id: Json, params: Json) {
     *version := PROTOCOL
-    if given := member(params, "protocolVersion") {
+    if given := member(params, "protocolVersion") is not absent {
         if given is text { version = text }
-    } else if absent { }
+    }
     *out: [..] u8
     append(out, "{\"jsonrpc\":\"2.0\",\"id\":")
     write_json(out, id)
