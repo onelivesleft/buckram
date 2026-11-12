@@ -80,8 +80,9 @@ log :: (text: string) {
 seen :: (path: string -> Seen) {
     if entry := file_info(path) {
         return ⟨true, entry.size, entry.modified⟩
-    } else if absent or os_error { }
-    return ⟨⟩
+    } else if absent or os_error {
+        return ⟨⟩
+    }
 }
 
 // Has the core or buckram.json changed since last asked?

@@ -159,9 +159,11 @@ read_task :: (name: string, value: Json -> task: Task) [bad_task: string] {
 // A member that's a string, or "".
 text_member :: (value: Json, name: string -> string) {
     if found := member(value, name) {
-        if found is text { return text }
-    } else if absent { }
-    return ""
+        if found is text then return text
+        return ""
+    } else if absent {
+        return ""
+    }
 }
 
 // A member that's a list of strings (others left out), or none.
@@ -171,8 +173,10 @@ texts_member :: (value: Json, name: string -> [] string) {
         if found is list {
             for item: list { if item is text { texts.add(text) } }
         }
-    } else if absent { }
-    return texts
+        return texts
+    } else if absent {
+        return texts
+    }
 }
 
 //- the protocol: JSON-RPC 2.0, a message a line
