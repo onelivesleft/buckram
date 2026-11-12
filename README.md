@@ -10,8 +10,10 @@ arguments as a list, so what the agent writes arrives as it is.
 An agent setting it up, or working on it, reads [AGENTS.md](AGENTS.md).
 
 Written in 'rain, a systems language for agents to write: the stub,
-[buckram.rain](buckram.rain); the tools, [core.rain](core.rain); and its
-build, [build.rain](build.rain).
+[src/stub.rain](src/stub.rain); the tools, [src/core.rain](src/core.rain);
+and its build, [build.rain](build.rain). Built, they're `bin/buckram.exe`
+and `bin/buckram_core.exe`, which are in the repository, so it runs as it
+is downloaded: nothing needs building first.
 
 ## Tools
 
@@ -63,9 +65,9 @@ which parses its command line again.
 
 ## How it reloads
 
-`buckram.exe` is a stub, which the agent's harness starts and keeps
+`bin/buckram.exe` is a stub, which the agent's harness starts and keeps
 running. It answers `initialize` itself, and for any other message starts
-`buckram_core.exe` afresh, in the project's folder, gives it the message
+`bin/buckram_core.exe` afresh, in the project's folder, gives it the message
 as its standard input, and passes on its answer. So a rebuilt core, or a
 changed `buckram.json`, is in use from the next message on: nothing needs
 restarting. Nothing reaches the core on a command line.
@@ -75,17 +77,7 @@ stub sends `notifications/tools/list_changed`, so the client lists the
 tools again; it says so once a session starts too, as a client may keep an
 old list.
 
-## Building and using it
-
-```
-rain build.rain
-build.exe [path to rain.exe]
-```
-
-builds `buckram.exe` and `buckram_core.exe`. Windows won't overwrite a
-running exe but will rename one, so one in use is moved into
-`build/old_exes` first, and runs on from there; those no longer running
-are cleared out the next time.
+## Using it
 
 For Claude Code, add it to the project's `.mcp.json`, with the project's
 folder as its argument:
@@ -93,10 +85,24 @@ folder as its argument:
 ```json
 {
   "mcpServers": {
-    "buckram": { "command": "c:/repos/buckram/buckram.exe", "args": ["c:/path/to/project"] }
+    "buckram": { "command": "c:/repos/buckram/bin/buckram.exe", "args": ["c:/path/to/project"] }
   }
 }
 ```
+
+## Building it
+
+Only after changing `src/`, with the 'rain compiler:
+
+```
+rain build.rain
+build.exe [path to rain.exe]
+```
+
+builds `bin/buckram.exe` and `bin/buckram_core.exe`. Windows won't
+overwrite a running exe but will rename one, so one in use is moved into
+`bin/old_exes` first, and runs on from there; those no longer running are
+cleared out the next time. Commit the new exes with the sources.
 
 It speaks MCP over standard input and output, a JSON-RPC message a line,
 and writes only those there; what it has to say otherwise goes to

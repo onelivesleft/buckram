@@ -1,4 +1,4 @@
-// buckram's core: what each of buckram's tools does. buckram.exe (the
+// buckram's core: what each of buckram's tools does. bin/buckram.exe (the
 // stub, which the agent's harness keeps running) starts it afresh for each
 // message, in the project's folder, gives it the message as its standard
 // input, and passes on what it writes: one JSON-RPC response, on one line.

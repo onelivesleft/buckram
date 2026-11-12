@@ -39,8 +39,9 @@ A tool's result is an error when its program exits with a code other than
 
 ## Setting it up in a project
 
-1. **Build buckram** if `buckram.exe` and `buckram_core.exe` aren't beside
-   `build.rain` (see below).
+1. **Nothing to build:** `bin/buckram.exe` and `bin/buckram_core.exe` are
+   in the repository (build them again only after changing `src/`; see
+   below).
 2. **Write the project's `buckram.json`**, in its folder, from the commands
    the project's documentation (or its scripts) give for building, testing
    and so on:
@@ -69,7 +70,7 @@ A tool's result is an error when its program exits with a code other than
    ```json
    {
      "mcpServers": {
-       "buckram": { "type": "stdio", "command": "c:/repos/buckram/buckram.exe", "args": ["c:/path/to/project"] }
+       "buckram": { "type": "stdio", "command": "c:/repos/buckram/bin/buckram.exe", "args": ["c:/path/to/project"] }
      }
    }
    ```
@@ -94,21 +95,24 @@ A tool's result is an error when its program exits with a code other than
 
 ## Working on buckram
 
-- **The files:** [buckram.rain](buckram.rain) is the stub, which the
-  client starts and keeps running: it answers `initialize`, and for every
-  other message starts `buckram_core.exe` afresh in the project's folder
-  with the message as its standard input. [core.rain](core.rain) has the
-  tools. [build.rain](build.rain) builds both. It's written in 'rain: its
+- **The files:** [src/stub.rain](src/stub.rain) is the stub
+  (`bin/buckram.exe`), which the client starts and keeps running: it
+  answers `initialize`, and for every other message starts
+  `bin/buckram_core.exe` afresh in the project's folder with the message as
+  its standard input. [src/core.rain](src/core.rain) has the tools.
+  [build.rain](build.rain) builds both into `bin/`, whose exes are
+  committed, so buckram is used as it's downloaded. It's written in 'rain: its
   compiler's `AGENTS.md` says how to write it, and `rain -query:module
   Json` (or `System`, `File`, `String`) lists what the modules offer.
 - **Building:** `rain build.rain` once, then `build.exe [path to
   rain.exe]`. Windows won't overwrite a running exe but will rename one,
-  so `build.exe` moves one that's in use into `build/old_exes` (clearing
+  so `build.exe` moves one that's in use into `bin/old_exes` (clearing
   out those no longer running) and builds in its place. Through buckram:
-  `run` with program `c:/repos/buckram/build.exe`.
+  `run` with program `c:/repos/buckram/build.exe`. Commit the rebuilt exes
+  in `bin/` with the change to `src/`.
 - **What needs a restart:** a rebuilt core is in use from the next call,
   and so is a changed `buckram.json`, and the stub tells the client its
-  tools may have changed. A change to the stub (`buckram.rain`: its
+  tools may have changed. A change to the stub (`src/stub.rain`: its
   instructions, `initialize`, how it starts the core) needs the client to
   restart, as the running stub is the old one until then.
 - **Testing:** feed a session to it, a JSON-RPC message a line, and read
@@ -119,7 +123,7 @@ A tool's result is an error when its program exits with a code other than
   {"jsonrpc":"2.0","id":1,"method":"tools/list"}
   {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run","arguments":{"program":"python","arguments":["-c","print(1)"]}}}
   ```
-  through `run` (program `c:/repos/buckram/buckram.exe`, arguments the
+  through `run` (program `c:/repos/buckram/bin/buckram.exe`, arguments the
   project folder, `input` the session). Use a scratch folder with its own
   `buckram.json` for tests that change tasks, so the real one isn't
   touched.
