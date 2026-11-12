@@ -1,0 +1,61 @@
+// Builds buckram: buckram.exe (the stub) and buckram_core.exe, beside this
+// file, with the 'rain compiler (rain on the PATH, or the one given):
+//
+//     rain build.rain
+//     build.exe [path to rain.exe]
+//
+// Windows won't overwrite a running exe, but will rename one, and the stub
+// runs as long as its agent's session: so one in use is moved into
+// build/old_exes first, and runs on from there. Those no longer running
+// are cleared out each time. (The core runs only while it answers a
+// message, so it's rarely in use; it's treated the same way.)
+
+#import "Console"
+#import "String"
+#import "File"
+#import "System"
+
+main :: (args: [] string) [failed: string] {
+    *compiler := "rain"
+    if args.count > 1 then compiler = args[1]
+    *here := current_folder()
+    if whole := full_path(args[0]) { here = folder_of(whole) } else if os_error { }
+    old := join_path(here, "build/old_exes")
+    if create_folder(old) is os_error { fail: failed = "build/old_exes can't be made («os_error»)" }
+    // The ones no longer running go (one still running can't be deleted).
+    if entries := files_in(old) {
+        for entry: entries {
+            if entry.is_folder then continue
+            if delete_file(entry.path) is absent or os_error { }
+        }
+    } else if absent or os_error { }
+    if build_one(compiler, here, old, "buckram.rain", "buckram.exe") is failed { fail: failed = failed }
+    if build_one(compiler, here, old, "core.rain", "buckram_core.exe") is failed { fail: failed = failed }
+}
+
+build_one :: (compiler: string, here: string, old: string, source: string, exe: string) [failed: string] {
+    target := join_path(here, exe)
+    if file_exists(target) {
+        if delete_file(target) {
+        } else if absent {
+        } else if os_error {
+            // In use: moved aside, to run on from there.
+            *n := 1
+            while file_exists(join_path(old, "«without_extension(exe)»_«n».exe")) { n += 1 }
+            aside := join_path(old, "«without_extension(exe)»_«n».exe")
+            if rename_file(target, aside) {
+                echo("«exe» is in use: moved to build/old_exes/«file_name(aside)», where it runs on")
+            } else if absent or os_error {
+                fail: failed = "«exe» is in use, and can't be moved aside either"
+            }
+        }
+    }
+    if code, output, errors := run(compiler, join_path(here, source), "-out:«target»") {
+        if code != 0 then fail: failed = "«source» didn't build:\n«output»«errors»"
+        echo("built «exe»")
+    } else if absent {
+        fail: failed = "there's no compiler '«compiler»': give its path, build.exe C:/rain/build/rain.exe"
+    } else if os_error {
+        fail: failed = "the compiler couldn't be run («os_error»)"
+    }
+}

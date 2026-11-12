@@ -1,0 +1,662 @@
+// buckram's core: what each of buckram's tools does. buckram.exe (the
+// stub, which the agent's harness keeps running) starts it afresh for each
+// message, in the project's folder, gives it the message as its standard
+// input, and passes on what it writes: one JSON-RPC response, on one line.
+// So a rebuilt core is in use from the next message on, and a changed
+// buckram.json too, with nothing to restart. Nothing reaches it on a
+// command line: the message is its input, and the folder is where it
+// starts.
+//
+// Each tool takes its arguments as JSON and runs a program with them as a
+// list, so nothing is quoted, escaped or expanded on the way: a backslash,
+// a $ or a quote arrives as it is.
+//
+// Its tools:
+//   run          a program, with its arguments, folder, input and timeout
+//   git          status, diff, log, show, add and commit (a commit's message
+//                is given as text, never on a command line)
+//   edit         exact replacements in files, all or none
+//   task         a task of buckram.json's by name (one added since the
+//                client last listed the tools included)
+//   add_task     adds (or replaces) a task in buckram.json
+//   remove_task  takes one out
+//   and each task the project's buckram.json declares (build, test, ...)
+//
+// What a program writes comes back as its exit code, then its output and
+// errors, cut in the middle past output_limit bytes (the whole of it is
+// kept in output_folder, under the tool's name).
+//
+// The project's buckram.json:
+//
+//     {
+//       "output_limit": 8192,
+//       "output_folder": "build/buckram",
+//       "tasks": {
+//         "build": { "description": "Builds the compiler.", "run": ["python", "tools/dev.py", "build"] },
+//         "test":  { "description": "Runs the tests.", "run": ["python", "tools/dev.py", "test"],
+//                    "arguments": "list", "timeout": 900 }
+//       }
+//     }
+//
+// A task's "arguments" is "none" (the default) or "list": then the tool
+// takes a list of strings, added after its run. Its timeout is in seconds
+// (600 by default).
+
+#import "Console"
+#import "String"
+#import "File"
+#import "System"
+#import "Json"
+
+VERSION :: "0.1.0"
+PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
+DEFAULT_TIMEOUT : f64 : 600
+GIT_COMMANDS :: [] string ⟨"status", "diff", "log", "show", "add", "commit"⟩
+OWN_TOOLS :: [] string ⟨"run", "git", "edit", "task", "add_task", "remove_task"⟩
+CONFIG_FILE :: "buckram.json"
+
+Takes :: enum { NONE; LIST }
+
+Task :: struct {
+    name: string
+    description: string
+    command: [] string           // the program, then its arguments
+    takes: Takes
+    timeout: f64
+}
+
+Config :: struct {
+    folder: string               // the project's (the one buckram was started in)
+    output_limit: i64
+    output_folder: string        // relative to folder
+    tasks: [] Task
+}
+
+config: Config
+
+// One message, from its input; the answer (if it needs one) to its output.
+main :: () {
+    config = load_config()
+    if line := read_line() {
+        handle(line)
+    } else if end_of_input {
+    }
+}
+
+is_own_tool :: (name: string -> bool) {
+    for own: OWN_TOOLS { if own == name then return true }
+    return false
+}
+
+log :: (text: string) {
+    echo(.ERROR, "buckram: «text»")
+}
+
+//- buckram.json
+
+load_config :: (-> loaded: Config) {
+    loaded = ⟨⟩
+    loaded.folder = current_folder()
+    loaded.output_limit = 8192
+    loaded.output_folder = "build/buckram"
+    *tasks: [..] Task
+    if contents := read_file(join_path(loaded.folder, CONFIG_FILE)) {
+        if value := parse_json(contents) {
+            if limit := member(value, "output_limit") {
+                if limit is number {
+                    if n := to_i64(number) { if n > 64 then loaded.output_limit = n } else if invalid or too_big { log("output_limit isn't a whole number") }
+                }
+            } else if absent { }
+            if folder := member(value, "output_folder") {
+                if folder is text { loaded.output_folder = text }
+            } else if absent { }
+            if declared := member(value, "tasks") {
+                if declared is object {
+                    for name, i: object.names {
+                        if is_own_tool(name) {
+                            log("the task '«name»' has the name of one of buckram's own tools, so it's left out")
+                            continue
+                        }
+                        if task := read_task(name, object.values[i]) { tasks.add(task) } else if bad_task { log("the task '«name»': «bad_task»") }
+                    }
+                }
+            } else if absent { }
+        } else if bad_json {
+            log("buckram.json isn't JSON (at byte «bad_json.at»: «bad_json.why»), so it has no tasks")
+        }
+    } else if absent {
+    } else if os_error {
+        log("buckram.json can't be read («os_error»)")
+    }
+    loaded.tasks = tasks
+}
+
+read_task :: (name: string, value: Json -> task: Task) [bad_task: string] {
+    task = ⟨⟩
+    task.name = name
+    task.timeout = DEFAULT_TIMEOUT
+    task.description = text_member(value, "description")
+    *command: [..] string
+    if run := member(value, "run") {
+        if run is list {
+            for piece: list {
+                if piece is text { command.add(text) } else { fail: bad_task = "its run is a list of strings, the program first" }
+            }
+        }
+    } else if absent { }
+    if command.count == 0 then fail: bad_task = "it needs a run: the program and its arguments, as a list of strings"
+    task.command = command
+    takes := text_member(value, "arguments")
+    if takes == "list" { task.takes = .LIST }
+    else if takes != "" and takes != "none" { fail: bad_task = "its arguments is \"none\" or \"list\"" }
+    if timeout := member(value, "timeout") {
+        if timeout is number {
+            if t := to_f64(number) { task.timeout = t } else if invalid { }
+        }
+    } else if absent { }
+}
+
+// A member that's a string, or "".
+text_member :: (value: Json, name: string -> string) {
+    if found := member(value, name) {
+        if found is text { return text }
+    } else if absent { }
+    return ""
+}
+
+// A member that's a list of strings (others left out), or none.
+texts_member :: (value: Json, name: string -> [] string) {
+    *texts: [..] string
+    if found := member(value, name) {
+        if found is list {
+            for item: list { if item is text { texts.add(text) } }
+        }
+    } else if absent { }
+    return texts
+}
+
+//- the protocol: JSON-RPC 2.0, a message a line
+
+handle :: (line: string) {
+    if trim(line).count == 0 then return
+    if request := parse_json(line) {
+        method := text_member(request, "method")
+        *id: Json
+        *has_id := false
+        if given := member(request, "id") {
+            id = given
+            has_id = true
+        } else if absent { }
+        if !has_id then return        // a notification (notifications/initialized, ...): nothing to answer
+        *params: Json
+        if p := member(request, "params") { params = p } else if absent { }
+        *result: [..] u8
+        if method == "tools/list" {
+            list_tools(result)
+        } else if method == "tools/call" {
+            call_tool(result, params)
+        } else if method == "ping" {
+            append(result, "{}")
+        } else {
+            respond_error(id, -32601, "there's no method '«method»'")
+            return
+        }
+        respond(id, string'result)
+    } else if bad_json {
+        respond_error(Json.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
+    }
+}
+
+respond :: (id: Json, result: string) {
+    *out: [..] u8
+    append(out, "{\"jsonrpc\":\"2.0\",\"id\":")
+    write_json(out, id)
+    append(out, ",\"result\":", result, "}")
+    echo(string'out)
+}
+
+respond_error :: (id: Json, code: i64, message: string) {
+    *out: [..] u8
+    append(out, "{\"jsonrpc\":\"2.0\",\"id\":")
+    write_json(out, id)
+    append(out, ",\"error\":{\"code\":«code»,\"message\":")
+    write_json_text(out, message)
+    append(out, "}}")
+    echo(string'out)
+}
+
+
+//- the tools
+
+ARGUMENTS_SCHEMA :: "{\"type\":\"array\",\"items\":{\"type\":\"string\"}}"
+
+list_tools :: (out: *[..] u8) {
+    append(out, "{\"tools\":[")
+    tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default). Gives its exit code, output and errors.",
+         "{\"type\":\"object\",\"properties\":{\"program\":{\"type\":\"string\"},\"arguments\":«ARGUMENTS_SCHEMA»,\"folder\":{\"type\":\"string\"},\"input\":{\"type\":\"string\"},\"timeout\":{\"type\":\"number\"}},\"required\":[\"program\"]}")
+    append(out, ",")
+    tool(out, "git", "Runs git in the project: status, diff, log, show, add or commit, with more arguments as a list. A commit takes its message as message (given to git as its input, never on a command line). Nothing that rewrites or discards history or work (push, reset, checkout, rebase, clean) is offered.",
+         "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"enum\":[\"status\",\"diff\",\"log\",\"show\",\"add\",\"commit\"]},\"arguments\":«ARGUMENTS_SCHEMA»,\"message\":{\"type\":\"string\"}},\"required\":[\"command\"]}")
+    append(out, ",")
+    tool(out, "edit", "Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text (\"\") that doesn't exist is made with new as its contents. Paths are the project's.",
+         "{\"type\":\"object\",\"properties\":{\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"file\":{\"type\":\"string\"},\"old\":{\"type\":\"string\"},\"new\":{\"type\":\"string\"},\"count\":{\"type\":\"integer\"}},\"required\":[\"file\",\"old\",\"new\"]}}},\"required\":[\"edits\"]}")
+    append(out, ",")
+    *names: [..] u8
+    for task, i: config.tasks {
+        if i > 0 then append(names, ", ")
+        append(names, task.name)
+    }
+    if names.count == 0 then append(names, "none yet")
+    tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them: the way to run a task added since the tools were last listed. Its tasks now: «string'names».",
+         "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"arguments\":«ARGUMENTS_SCHEMA»},\"required\":[\"name\"]}")
+    append(out, ",")
+    tool(out, "add_task", "Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: \"none\" or \"list\"), and a timeout in seconds. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile.",
+         "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"run\":«ARGUMENTS_SCHEMA»,\"arguments\":{\"type\":\"string\",\"enum\":[\"none\",\"list\"]},\"timeout\":{\"type\":\"number\"}},\"required\":[\"name\",\"run\"]}")
+    append(out, ",")
+    tool(out, "remove_task", "Takes a task out of the project's buckram.json.",
+         "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}")
+    for task: config.tasks {
+        append(out, ",")
+        *description := task.description
+        if description == "" then description = "Runs the project's task '«task.name»'."
+        if task.takes == .LIST {
+            tool(out, task.name, "«description» Arguments given as a list are added after its own.",
+                 "{\"type\":\"object\",\"properties\":{\"arguments\":«ARGUMENTS_SCHEMA»}}")
+        } else {
+            tool(out, task.name, description, "{\"type\":\"object\",\"properties\":{}}")
+        }
+    }
+    append(out, "]}")
+}
+
+tool :: (out: *[..] u8, name: string, description: string, schema: string) {
+    append(out, "{\"name\":")
+    write_json_text(out, name)
+    append(out, ",\"description\":")
+    write_json_text(out, description)
+    append(out, ",\"inputSchema\":", schema, "}")
+}
+
+call_tool :: (out: *[..] u8, params: Json) {
+    name := text_member(params, "name")
+    *arguments: Json
+    if given := member(params, "arguments") { arguments = given } else if absent { }
+    if name == "run" { run_tool(out, arguments); return }
+    if name == "git" { git_tool(out, arguments); return }
+    if name == "edit" { edit_tool(out, arguments); return }
+    if name == "add_task" { add_task_tool(out, arguments); return }
+    if name == "remove_task" { remove_task_tool(out, arguments); return }
+    if name == "task" {
+        wanted := text_member(arguments, "name")
+        for task: config.tasks {
+            if task.name == wanted {
+                run_task(out, task, arguments)
+                return
+            }
+        }
+        tool_result(out, "there's no task '«wanted»' in «CONFIG_FILE» (its tasks: «task_names()»)", true)
+        return
+    }
+    for task: config.tasks {
+        if task.name == name {
+            run_task(out, task, arguments)
+            return
+        }
+    }
+    tool_result(out, "there's no tool '«name»'", true)
+}
+
+task_names :: (-> string) {
+    *names: [..] u8
+    for task, i: config.tasks {
+        if i > 0 then append(names, ", ")
+        append(names, task.name)
+    }
+    if names.count == 0 then append(names, "none")
+    return string'names
+}
+
+run_task :: (out: *[..] u8, task: Task, arguments: Json) {
+    *command: [..] string
+    for piece: task.command[1:] { command.add(piece) }
+    if task.takes == .LIST {
+        for extra: texts_member(arguments, "arguments") { command.add(extra) }
+    }
+    // A program given as a path (build/rain.exe) is the project's.
+    *program := task.command[0]
+    if contains_any(program, "/\\") then program = in_project(program)
+    run_program(out, task.name, ⟨folder: config.folder, timeout: task.timeout⟩, program, command)
+}
+
+//- Changing the tasks
+
+// buckram.json as it is (an object), or an empty one if there's none.
+read_config_file :: (-> value: Json) [bad_config: string] {
+    value = Json.object(⟨⟩)
+    if contents := read_file(join_path(config.folder, CONFIG_FILE)) {
+        if parsed := parse_json(contents) {
+            if parsed is object { value = parsed } else { fail: bad_config = "«CONFIG_FILE» isn't a JSON object, so it isn't changed" }
+        } else if bad_json {
+            fail: bad_config = "«CONFIG_FILE» isn't JSON (at byte «bad_json.at»: «bad_json.why»), so it isn't changed: fix it with edit"
+        }
+    } else if absent {
+    } else if os_error {
+        fail: bad_config = "«CONFIG_FILE» can't be read («os_error»)"
+    }
+}
+
+// The object with its member of that name set to value (the first of the
+// name replaced, or it added at the end); or, with no value, taken out.
+with_member :: (object: Json_Object, name: string, value: Json, remove: bool -> Json_Object) {
+    *names: [..] string
+    *values: [..] Json
+    *done := false
+    for n, i: object.names {
+        if n == name and !done {
+            done = true
+            if remove then continue
+            names.add(n)
+            values.add(value)
+            continue
+        }
+        names.add(n)
+        values.add(object.values[i])
+    }
+    if !done and !remove {
+        names.add(name)
+        values.add(value)
+    }
+    return ⟨names, values⟩
+}
+
+// Writes buckram.json, laid out to read.
+write_config_file :: (value: Json) [bad_config: string] {
+    *out: [..] u8
+    write_json(out, value, 2)
+    out.add("\n")
+    if write_file(join_path(config.folder, CONFIG_FILE), string'out) {
+    } else if absent {
+        fail: bad_config = "«CONFIG_FILE» can't be written: the project's folder isn't there"
+    } else if os_error {
+        fail: bad_config = "«CONFIG_FILE» can't be written («os_error»)"
+    }
+}
+
+// An object's members, or none for anything else.
+as_object :: (value: Json -> Json_Object) {
+    if value is object { return object }
+    return ⟨⟩
+}
+
+// A task's name: letters, digits and _, as a tool's name is best.
+good_name :: (name: string -> bool) {
+    if name.count == 0 or name.count > 48 then return false
+    for c: name {
+        if !((c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "_") then return false
+    }
+    return true
+}
+
+add_task_tool :: (out: *[..] u8, arguments: Json) {
+    name := text_member(arguments, "name")
+    if !good_name(name) {
+        tool_result(out, "a task's name is letters, digits and _ (up to 48), as a tool's is: not '«name»'", true)
+        return
+    }
+    if is_own_tool(name) {
+        tool_result(out, "'«name»' is one of buckram's own tools, so a task can't have that name", true)
+        return
+    }
+    run := texts_member(arguments, "run")
+    if run.count == 0 {
+        tool_result(out, "add_task needs run: the program and its arguments, as a list of strings, the program first", true)
+        return
+    }
+    *takes := text_member(arguments, "arguments")
+    if takes == "" then takes = "none"
+    if takes != "none" and takes != "list" {
+        tool_result(out, "a task's arguments is \"none\" or \"list\", not \"«takes»\"", true)
+        return
+    }
+    // The task, as buckram.json holds one.
+    *names: [..] string
+    *values: [..] Json
+    description := text_member(arguments, "description")
+    if description != "" {
+        names.add("description")
+        values.add(Json.text(description))
+    }
+    *pieces: [..] Json
+    for piece: run { pieces.add(Json.text(piece)) }
+    names.add("run")
+    values.add(Json.list(pieces))
+    if takes == "list" {
+        names.add("arguments")
+        values.add(Json.text("list"))
+    }
+    if t := member(arguments, "timeout") {
+        if t is number {
+            names.add("timeout")
+            values.add(t)
+        }
+    } else if absent { }
+    task := Json.object(⟨names, values⟩)
+    *replaced := false
+    for existing: config.tasks { if existing.name == name then replaced = true }
+    if file := read_config_file() {
+        *tasks := Json_Object⟨⟩
+        if listed := member(file, "tasks") { tasks = as_object(listed) } else if absent { }
+        updated := Json.object(with_member(as_object(file), "tasks", Json.object(with_member(tasks, name, task, false)), false))
+        if write_config_file(updated) is bad_config {
+            tool_result(out, bad_config, true)
+            return
+        }
+    } else if bad_config {
+        tool_result(out, bad_config, true)
+        return
+    }
+    *how := "added"
+    if replaced then how = "replaced"
+    tool_result(out, "the task '«name»' is «how» in «CONFIG_FILE». It's a tool of its own once the client lists buckram's tools again (buckram has told it they've changed); until then, task with name '«name»' runs it.", false)
+}
+
+remove_task_tool :: (out: *[..] u8, arguments: Json) {
+    name := text_member(arguments, "name")
+    *found := false
+    for existing: config.tasks { if existing.name == name then found = true }
+    if !found {
+        tool_result(out, "there's no task '«name»' in «CONFIG_FILE» (its tasks: «task_names()»)", true)
+        return
+    }
+    if file := read_config_file() {
+        *tasks := Json_Object⟨⟩
+        if listed := member(file, "tasks") { tasks = as_object(listed) } else if absent { }
+        updated := Json.object(with_member(as_object(file), "tasks", Json.object(with_member(tasks, name, ⟨⟩, true)), false))
+        if write_config_file(updated) is bad_config {
+            tool_result(out, bad_config, true)
+            return
+        }
+    } else if bad_config {
+        tool_result(out, bad_config, true)
+        return
+    }
+    tool_result(out, "the task '«name»' is taken out of «CONFIG_FILE»", false)
+}
+
+run_tool :: (out: *[..] u8, arguments: Json) {
+    program := text_member(arguments, "program")
+    if program == "" {
+        tool_result(out, "run needs a program", true)
+        return
+    }
+    *folder := text_member(arguments, "folder")
+    if folder == "" { folder = config.folder } else { folder = in_project(folder) }
+    *timeout := DEFAULT_TIMEOUT
+    if t := member(arguments, "timeout") {
+        if t is number { if seconds := to_f64(number) { timeout = seconds } else if invalid { } }
+    } else if absent { }
+    run_program(out, "run", ⟨folder: folder, input: text_member(arguments, "input"), timeout: timeout⟩, program, texts_member(arguments, "arguments"))
+}
+
+git_tool :: (out: *[..] u8, arguments: Json) {
+    command := text_member(arguments, "command")
+    *known := false
+    for c: GIT_COMMANDS { if c == command then known = true }
+    if !known {
+        tool_result(out, "git here runs status, diff, log, show, add or commit, not '«command»'", true)
+        return
+    }
+    *line: [..] string
+    line.add("-c")
+    line.add("core.quotepath=false")
+    line.add(command)
+    *input := ""
+    if command == "commit" {
+        message := text_member(arguments, "message")
+        if message == "" {
+            tool_result(out, "a commit needs its message, as message", true)
+            return
+        }
+        line.add("-F")
+        line.add("-")
+        input = message
+    }
+    for extra: texts_member(arguments, "arguments") { line.add(extra) }
+    run_program(out, "git", ⟨folder: config.folder, input: input, timeout: DEFAULT_TIMEOUT⟩, "git", line)
+}
+
+// A path the agent gives: the project's, unless it's whole already.
+in_project :: (path: string -> string) {
+    if path.count >= 2 and path[1] == ":" then return path
+    if starts_with(path, "/") or starts_with(path, "\\") then return path
+    return join_path(config.folder, path)
+}
+
+Edit :: struct {
+    file: string
+    old: string
+    new: string
+    count: i64
+}
+
+Changed :: struct {
+    path: string
+    text: string
+    made: bool              // a new file
+}
+
+edit_tool :: (out: *[..] u8, arguments: Json) {
+    *edits: [..] Edit
+    if given := member(arguments, "edits") {
+        if given is list {
+            for item: list {
+                *e := Edit⟨text_member(item, "file"), text_member(item, "old"), text_member(item, "new"), 1⟩
+                if c := member(item, "count") {
+                    if c is number { if n := to_i64(number) { e.count = n } else if invalid or too_big { } }
+                } else if absent { }
+                edits.add(e)
+            }
+        }
+    } else if absent { }
+    if edits.count == 0 {
+        tool_result(out, "edit needs edits: a list of {file, old, new}", true)
+        return
+    }
+    // Each file's text, with the edits made in turn; nothing written until
+    // all are found.
+    *files: [..] Changed
+    for e, k: edits {
+        path := in_project(e.file)
+        *at := -1
+        for f, i: files { if f.path == path then at = i }
+        if at < 0 {
+            if text := read_file(path) {
+                files.add(⟨path, text, false⟩)
+            } else if absent {
+                if e.old != "" {
+                    tool_result(out, "edit «k + 1»: there's no file «e.file» (nothing was written)", true)
+                    return
+                }
+                files.add(⟨path, "", true⟩)
+            } else if os_error {
+                tool_result(out, "edit «k + 1»: «e.file» can't be read: «os_error» (nothing was written)", true)
+                return
+            }
+            at = files.count - 1
+        }
+        *f := ^files[at]
+        if e.old == "" {
+            if !f.made or f.text != "" {
+                tool_result(out, "edit «k + 1»: an empty old text makes a new file, but «e.file» exists (nothing was written)", true)
+                return
+            }
+            f.text = e.new
+            continue
+        }
+        found := count_of(f.text, e.old)
+        if found != e.count {
+            tool_result(out, "edit «k + 1»: its old text is in «e.file» «found» time«plural(found)», not «e.count» (nothing was written)", true)
+            return
+        }
+        f.text = replace(f.text, e.old, e.new)
+    }
+    for f: files {
+        if write_file(f.path, f.text) {
+        } else if absent {
+            tool_result(out, "«f.path» can't be written (its folder isn't there): the files before it in the list were", true)
+            return
+        } else if os_error {
+            tool_result(out, "«f.path» can't be written («os_error»): the files before it in the list were", true)
+            return
+        }
+    }
+    tool_result(out, "«edits.count» edit«plural(edits.count)» made, in «files.count» file«plural(files.count)»", false)
+}
+
+// Runs it, and gives back what happened as the tool's result.
+run_program :: (out: *[..] u8, tool_name: string, options: Run_Options, program: string, arguments: [] string) {
+    if code, output, errors, timed_out := run_with(options, program, arguments..) {
+        *text: [..] u8
+        if timed_out { append(text, "timed out after «options.timeout» seconds, so it was ended\n") }
+        else { append(text, "exit code «code»\n") }
+        append(text, output)
+        if errors.count > 0 {
+            if output.count > 0 and !ends_with(output, "\n") then append(text, "\n")
+            append(text, "--- errors ---\n", errors)
+        }
+        tool_result(out, limited(tool_name, string'text), timed_out or code != 0)
+    } else if absent {
+        tool_result(out, "there's no program '«program»' (a path, or a name on the PATH)", true)
+    } else if os_error {
+        tool_result(out, "'«program»' couldn't be run: «os_error»", true)
+    }
+}
+
+// The text, cut in the middle past output_limit bytes (at a character's
+// start), the whole of it kept in the output folder.
+limited :: (tool_name: string, text: string -> string) {
+    if text.count <= config.output_limit then return text
+    folder := join_path(config.folder, config.output_folder)
+    if !folder_exists(folder) { if create_folder(folder) is os_error { } }
+    path := join_path(folder, "«tool_name».txt")
+    *kept := "(it couldn't be kept)"
+    if write_file(path, text) is not absent or os_error then kept = "all of it is in «path»"
+    half := config.output_limit / 2
+    *head := half
+    while head > 0 and (text[head] & 0xC0) == 0x80 { head -= 1 }
+    *tail := text.count - half
+    while tail < text.count and (text[tail] & 0xC0) == 0x80 { tail += 1 }
+    return "«text[:head]»\n... «tail - head» bytes left out here; «kept» ...\n«text[tail:]»"
+}
+
+// "s" after a count other than 1.
+plural :: (n: i64 -> string) {
+    if n == 1 then return ""
+    return "s"
+}
+
+tool_result :: (out: *[..] u8, text: string, is_error: bool) {
+    append(out, "{\"content\":[{\"type\":\"text\",\"text\":")
+    write_json_text(out, text)
+    append(out, "}],\"isError\":«is_error»}")
+}
