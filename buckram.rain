@@ -61,7 +61,17 @@ Config :: struct {
 
 config: Config
 
-main :: () {
+// buckram [project folder]: the folder it works in, and whose buckram.json
+// it reads (the one it's started in, if none is given).
+main :: (args: [] string) {
+    if args.count > 1 {
+        if set_current_folder(args[1]) {
+        } else if absent {
+            log("there's no folder «args[1]», so it works in «current_folder()»")
+        } else if os_error {
+            log("it can't work in «args[1]» («os_error»), so it works in «current_folder()»")
+        }
+    }
     config = load_config()
     loop {
         // Each message in an arena of its own, released once it's answered.

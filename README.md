@@ -60,12 +60,14 @@ which parses its command line again.
 rain buckram.rain
 ```
 
-makes `buckram.exe`. For Claude Code, add it to the project's `.mcp.json`:
+makes `buckram.exe`. Its argument is the project's folder (without one,
+the folder it's started in). For Claude Code, add it to the project's
+`.mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "buckram": { "command": "c:/repos/buckram/buckram.exe" }
+    "buckram": { "command": "c:/repos/buckram/buckram.exe", "args": ["c:/path/to/project"] }
   }
 }
 ```
