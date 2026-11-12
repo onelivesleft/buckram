@@ -36,18 +36,18 @@ main :: (args: [] string) [failed: string] {
 build_one :: (compiler: string, here: string, old: string, source: string, exe: string) [failed: string] {
     target := join_path(here, exe)
     if file_exists(target) {
-        if delete_file(target) {
-        } else if absent {
-        } else if os_error {
-            // In use: moved aside, to run on from there.
-            *n := 1
-            while file_exists(join_path(old, "«without_extension(exe)»_«n».exe")) { n += 1 }
-            aside := join_path(old, "«without_extension(exe)»_«n».exe")
-            if rename_file(target, aside) {
-                echo("«exe» is in use: moved to build/old_exes/«file_name(aside)», where it runs on")
-            } else if absent or os_error {
-                fail: failed = "«exe» is in use, and can't be moved aside either"
-            }
+        if delete_file(target) is {
+            case absent:
+            case os_error:
+                // In use: moved aside, to run on from there.
+                *n := 1
+                while file_exists(join_path(old, "«without_extension(exe)»_«n».exe")) { n += 1 }
+                aside := join_path(old, "«without_extension(exe)»_«n».exe")
+                if rename_file(target, aside) {
+                    echo("«exe» is in use: moved to build/old_exes/«file_name(aside)», where it runs on")
+                } else if absent or os_error {
+                    fail: failed = "«exe» is in use, and can't be moved aside either"
+                }
         }
     }
     if code, output, errors := run(compiler, join_path(here, source), "-out:«target»") {
