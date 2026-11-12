@@ -142,7 +142,7 @@ handle :: (line: string) {
 }
 
 tools_changed :: () {
-    echo("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}")
+    echo(#"{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"#)
 }
 
 initialize :: (id: Json, params: Json) {
@@ -151,11 +151,11 @@ initialize :: (id: Json, params: Json) {
         if given is text { version = text }
     }
     *out: [..] u8
-    append(out, "{\"jsonrpc\":\"2.0\",\"id\":")
+    append(out, #"{"jsonrpc":"2.0","id":"#)
     write_json(out, id)
-    append(out, ",\"result\":{\"protocolVersion\":")
+    append(out, #","result":{"protocolVersion":"#)
     write_json_text(out, version)
-    append(out, ",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"buckram\",\"version\":\"«VERSION»\"},\"instructions\":")
+    append(out, #","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"buckram","version":"«VERSION»"},"instructions":"#)
     write_json_text(out, INSTRUCTIONS)
     append(out, "}}")
     echo(string'out)
@@ -163,9 +163,9 @@ initialize :: (id: Json, params: Json) {
 
 respond_error :: (id: Json, code: i64, message: string) {
     *out: [..] u8
-    append(out, "{\"jsonrpc\":\"2.0\",\"id\":")
+    append(out, #"{"jsonrpc":"2.0","id":"#)
     write_json(out, id)
-    append(out, ",\"error\":{\"code\":«code»,\"message\":")
+    append(out, #","error":{"code":«code»,"message":"#)
     write_json_text(out, message)
     append(out, "}}")
     echo(string'out)

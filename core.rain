@@ -148,7 +148,7 @@ read_task :: (name: string, value: Json -> task: Task) [bad_task: string] {
     task.command = command
     takes := text_member(value, "arguments")
     if takes == "list" { task.takes = .LIST }
-    else if takes != "" and takes != "none" { fail: bad_task = "its arguments is \"none\" or \"list\"" }
+    else if takes != "" and takes != "none" { fail: bad_task = #"its arguments is "none" or "list""# }
     if timeout := member(value, "timeout") is not absent {
         if timeout is number {
             if t := to_f64(number) is not invalid { task.timeout = t }
@@ -213,17 +213,17 @@ handle :: (line: string) {
 
 respond :: (id: Json, result: string) {
     *out: [..] u8
-    append(out, "{\"jsonrpc\":\"2.0\",\"id\":")
+    append(out, #"{"jsonrpc":"2.0","id":"#)
     write_json(out, id)
-    append(out, ",\"result\":", result, "}")
+    append(out, #","result":"#, result, "}")
     echo(string'out)
 }
 
 respond_error :: (id: Json, code: i64, message: string) {
     *out: [..] u8
-    append(out, "{\"jsonrpc\":\"2.0\",\"id\":")
+    append(out, #"{"jsonrpc":"2.0","id":"#)
     write_json(out, id)
-    append(out, ",\"error\":{\"code\":«code»,\"message\":")
+    append(out, #","error":{"code":«code»,"message":"#)
     write_json_text(out, message)
     append(out, "}}")
     echo(string'out)
@@ -232,18 +232,18 @@ respond_error :: (id: Json, code: i64, message: string) {
 
 //- the tools
 
-ARGUMENTS_SCHEMA :: "{\"type\":\"array\",\"items\":{\"type\":\"string\"}}"
+ARGUMENTS_SCHEMA :: #"{"type":"array","items":{"type":"string"}}"#
 
 list_tools :: (out: *[..] u8) {
-    append(out, "{\"tools\":[")
+    append(out, #"{"tools":["#)
     tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default). Gives its exit code, output and errors.",
-         "{\"type\":\"object\",\"properties\":{\"program\":{\"type\":\"string\"},\"arguments\":«ARGUMENTS_SCHEMA»,\"folder\":{\"type\":\"string\"},\"input\":{\"type\":\"string\"},\"timeout\":{\"type\":\"number\"}},\"required\":[\"program\"]}")
+         #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"timeout":{"type":"number"}},"required":["program"]}"#)
     append(out, ",")
     tool(out, "git", "Runs git in the project: status, diff, log, show, add or commit, with more arguments as a list. A commit takes its message as message (given to git as its input, never on a command line). Nothing that rewrites or discards history or work (push, reset, checkout, rebase, clean) is offered.",
-         "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"enum\":[\"status\",\"diff\",\"log\",\"show\",\"add\",\"commit\"]},\"arguments\":«ARGUMENTS_SCHEMA»,\"message\":{\"type\":\"string\"}},\"required\":[\"command\"]}")
+         #"{"type":"object","properties":{"command":{"type":"string","enum":["status","diff","log","show","add","commit"]},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"}},"required":["command"]}"#)
     append(out, ",")
-    tool(out, "edit", "Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text (\"\") that doesn't exist is made with new as its contents. Paths are the project's.",
-         "{\"type\":\"object\",\"properties\":{\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"file\":{\"type\":\"string\"},\"old\":{\"type\":\"string\"},\"new\":{\"type\":\"string\"},\"count\":{\"type\":\"integer\"}},\"required\":[\"file\",\"old\",\"new\"]}}},\"required\":[\"edits\"]}")
+    tool(out, "edit", #"Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text ("") that doesn't exist is made with new as its contents. Paths are the project's."#,
+         #"{"type":"object","properties":{"edits":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"},"count":{"type":"integer"}},"required":["file","old","new"]}}},"required":["edits"]}"#)
     append(out, ",")
     *names: [..] u8
     for task, i: config.tasks {
@@ -252,33 +252,33 @@ list_tools :: (out: *[..] u8) {
     }
     if names.count == 0 then append(names, "none yet")
     tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them: the way to run a task added since the tools were last listed. Its tasks now: «string'names».",
-         "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"arguments\":«ARGUMENTS_SCHEMA»},\"required\":[\"name\"]}")
+         #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»},"required":["name"]}"#)
     append(out, ",")
-    tool(out, "add_task", "Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: \"none\" or \"list\"), and a timeout in seconds. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile.",
-         "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"run\":«ARGUMENTS_SCHEMA»,\"arguments\":{\"type\":\"string\",\"enum\":[\"none\",\"list\"]},\"timeout\":{\"type\":\"number\"}},\"required\":[\"name\",\"run\"]}")
+    tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
+         #"{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"run":«ARGUMENTS_SCHEMA»,"arguments":{"type":"string","enum":["none","list"]},"timeout":{"type":"number"}},"required":["name","run"]}"#)
     append(out, ",")
     tool(out, "remove_task", "Takes a task out of the project's buckram.json.",
-         "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}")
+         #"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#)
     for task: config.tasks {
         append(out, ",")
         *description := task.description
         if description == "" then description = "Runs the project's task '«task.name»'."
         if task.takes == .LIST {
             tool(out, task.name, "«description» Arguments given as a list are added after its own.",
-                 "{\"type\":\"object\",\"properties\":{\"arguments\":«ARGUMENTS_SCHEMA»}}")
+                 #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»}}"#)
         } else {
-            tool(out, task.name, description, "{\"type\":\"object\",\"properties\":{}}")
+            tool(out, task.name, description, #"{"type":"object","properties":{}}"#)
         }
     }
     append(out, "]}")
 }
 
 tool :: (out: *[..] u8, name: string, description: string, schema: string) {
-    append(out, "{\"name\":")
+    append(out, #"{"name":"#)
     write_json_text(out, name)
-    append(out, ",\"description\":")
+    append(out, #","description":"#)
     write_json_text(out, description)
-    append(out, ",\"inputSchema\":", schema, "}")
+    append(out, #","inputSchema":"#, schema, "}")
 }
 
 call_tool :: (out: *[..] u8, params: Json) {
@@ -419,7 +419,7 @@ add_task_tool :: (out: *[..] u8, arguments: Json) {
     *takes := text_member(arguments, "arguments")
     if takes == "" then takes = "none"
     if takes != "none" and takes != "list" {
-        tool_result(out, "a task's arguments is \"none\" or \"list\", not \"«takes»\"", true)
+        tool_result(out, #"a task's arguments is "none" or "list", not "«takes»""#, true)
         return
     }
     // The task, as buckram.json holds one.
@@ -660,7 +660,7 @@ plural :: (n: i64 -> string) {
 }
 
 tool_result :: (out: *[..] u8, text: string, is_error: bool) {
-    append(out, "{\"content\":[{\"type\":\"text\",\"text\":")
+    append(out, #"{"content":[{"type":"text","text":"#)
     write_json_text(out, text)
-    append(out, "}],\"isError\":«is_error»}")
+    append(out, #"}],"isError":«is_error»}"#)
 }
