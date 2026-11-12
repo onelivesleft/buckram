@@ -37,6 +37,11 @@ do; in short:
 A tool's result is an error when its program exits with a code other than
 0 or runs past its timeout; the output is still there.
 
+- **The call log:** every call is a line of `output_folder/calls.jsonl`
+  (`{"time", "tool", "arguments", "ms", "error", "bytes"}`). Read it now and
+  then for what repeats (the same `run`, a chain of calls that's one job)
+  and propose a task, or a tool of buckram's own, for it.
+
 ## Setting it up in a project
 
 1. **Nothing to build:** `bin/buckram.exe` and `bin/buckram_core.exe` are

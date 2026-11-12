@@ -26,6 +26,11 @@
 // errors, cut in the middle past output_limit bytes (the whole of it is
 // kept in output_folder, under the tool's name).
 //
+// Each call is logged, a JSON object a line, in output_folder/calls.jsonl:
+// when, the tool, its arguments, how long it took, whether it was an
+// error, and how big its result was. Read, it shows which jobs come up
+// often enough to be a task, or a tool of buckram's own.
+//
 // The project's buckram.json:
 //
 //     {
@@ -47,6 +52,7 @@
 #import "File"
 #import "System"
 #import "Json"
+#import "Time"
 
 VERSION :: "0.1.0"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
@@ -280,9 +286,34 @@ tool :: (out: *[..] u8, name: string, description: string, schema: string) {
 }
 
 call_tool :: (out: *[..] u8, params: Json) {
+    start := current_time_monotonic()
     name := text_member(params, "name")
     *arguments: Json
     if given := member(params, "arguments") is not absent { arguments = given }
+    call_named_tool(out, name, arguments)
+    record_call(name, arguments, current_time_monotonic() - start, string'out)
+}
+
+ERROR_RESULT_END :: #""isError":true}"#
+
+// The call's line in output_folder/calls.jsonl.
+record_call :: (name: string, arguments: Json, took: Apollo_Time, result: string) {
+    folder := join_path(config.folder, config.output_folder)
+    if !folder_exists(folder) { if create_folder(folder) is os_error { } }
+    *ms: i64 = 0
+    if m := to_milliseconds(took, true) { ms = m } else if too_big { }
+    *line: [..] u8
+    append(line, #"{"time":"#)
+    write_json_text(line, "«current_time_consensus()»")
+    append(line, #","tool":"#)
+    write_json_text(line, name)
+    append(line, #","arguments":"#)
+    write_json(line, arguments)
+    append(line, #","ms":«ms»,"error":«ends_with(result, ERROR_RESULT_END)»,"bytes":«result.count»}"#, "\n")
+    if append_file(join_path(folder, "calls.jsonl"), string'line) is absent or os_error { }
+}
+
+call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
     if name == "run" { run_tool(out, arguments); return }
     if name == "git" { git_tool(out, arguments); return }
     if name == "edit" { edit_tool(out, arguments); return }

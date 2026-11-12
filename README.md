@@ -34,6 +34,11 @@ is downloaded: nothing needs building first.
   an agent finds it needs while it works. They're written into
   `buckram.json` (laid out to read, so a change shows in `git diff`).
 
+Each call is logged, a JSON object a line, in `output_folder/calls.jsonl`:
+when, the tool and its arguments, how long it took, whether it was an
+error, and how big its result was. It shows which jobs an agent does often
+enough to be a task, or a tool of buckram's own.
+
 Each gives back the exit code, then the output and errors. Past
 `output_limit` bytes (8192 by default) the middle is cut, at a character's
 start, and the whole of it is kept in `output_folder/<tool>.txt`. A tool
