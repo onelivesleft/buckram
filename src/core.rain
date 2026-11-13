@@ -1,5 +1,6 @@
-// buckram's core: what each of buckram's tools does. bin/buckram.exe (the
-// stub, which the agent's harness keeps running) starts it afresh for each
+// buckram's core: what each of buckram's tools does, on Windows
+// (bin/buckram_core.exe) and Linux (bin/buckram_core). bin/buckram.exe or
+// bin/buckram (the stub, which the agent's harness keeps running) starts it afresh for each
 // message, in the project's folder, gives it the message as its standard
 // input, and passes on what it writes: one JSON-RPC response, on one line.
 // So a rebuilt core is in use from the next message on, and a changed
@@ -70,9 +71,9 @@ VERSION :: "0.2.0"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
 DEFAULT_TIMEOUT : f64 : 600
 // git's commands that only look, or only add to what's kept (add, commit,
-// fetch, tag, branch, ...): nothing they do can lose work, so nothing is
-// saved before them.
-LOOKING :: "status diff log show add commit grep ls-files ls-tree cat-file rev-parse rev-list merge-base for-each-ref blame describe shortlog fetch remote tag branch notes config help version check-ignore count-objects fsck name-rev show-ref symbolic-ref var whatchanged range-diff format-patch archive bundle verify-commit verify-tag"
+// fetch, tag, branch, init, clone, ...): nothing they do can lose work, so
+// nothing is saved before them.
+LOOKING :: "init clone status diff log show add commit grep ls-files ls-tree cat-file rev-parse rev-list merge-base for-each-ref blame describe shortlog fetch remote tag branch notes config help version check-ignore count-objects fsck name-rev show-ref symbolic-ref var whatchanged range-diff format-patch archive bundle verify-commit verify-tag"
 OWN_TOOLS :: [] string ⟨"run", "git", "edit", "files", "processes", "task", "add_task", "remove_task"⟩
 CONFIG_FILE :: "buckram.json"
 
@@ -267,7 +268,7 @@ list_tools :: (out: *[..] u8) {
     tool(out, "files", #"Files and folders, with no program to write: list (path, the project's folder by default: each entry's size, when it was last written, and its name; all: true for everything beneath it too), copy or move (from, to: a file, or a folder and all in it; files there are replaced, and the folders on the way made), and delete (paths: files, or folders with everything in them; read-only files are made writable first). Paths are the project's unless whole."#,
          #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","copy","move","delete"]},"path":{"type":"string"},"all":{"type":"boolean"},"from":{"type":"string"},"to":{"type":"string"},"paths":«ARGUMENTS_SCHEMA»},"required":["operation"]}"#)
     append(out, ",")
-    tool(out, "processes", #"The running processes: list (each one's id, its parent's, and its program; name to show only those whose program's name contains it), or end (name: every process of that program, such as rain.exe; or ids). buckram, and what started it (the agent's own client), are never ended."#,
+    tool(out, "processes", #"The running processes: list (each one's id, its parent's, and its program; name to show only those whose program's name contains it), or end (name: every process of that program, such as «EXAMPLE_PROGRAM»; or ids). buckram, and what started it (the agent's own client), are never ended."#,
          #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","end"]},"name":{"type":"string"},"ids":{"type":"array","items":{"type":"integer"}}},"required":["operation"]}"#)
     append(out, ",")
     *names: [..] u8
@@ -760,14 +761,19 @@ git_path :: (folder: string, name: string -> result: Git_Output) {
     result = git_output(folder, "rev-parse", "--git-path", name)
     if result.failed then return
     path := trim(result.text)
-    if path.count >= 2 and path[1] == ":" { result.text = path } else { result.text = join_path(folder, path) }
+    if is_whole(path) { result.text = path } else { result.text = join_path(folder, path) }
 }
 
 // A path the agent gives: the project's, unless it's whole already.
 in_project :: (path: string -> string) {
-    if path.count >= 2 and path[1] == ":" then return path
-    if starts_with(path, "/") or starts_with(path, "\\") then return path
+    if is_whole(path) then return path
     return join_path(config.folder, path)
+}
+
+// Is the path whole (C:/x, /x, or \x), not from a folder?
+is_whole :: (path: string -> bool) {
+    if path.count >= 2 and path[1] == ":" then return true
+    return starts_with(path, "/") or starts_with(path, "\\")
 }
 
 Edit :: struct {

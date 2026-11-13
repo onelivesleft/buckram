@@ -12,8 +12,9 @@ An agent setting it up, or working on it, reads [AGENTS.md](AGENTS.md).
 Written in 'rain, a systems language for agents to write: the stub,
 [src/stub.rain](src/stub.rain); the tools, [src/core.rain](src/core.rain);
 and its build, [build.rain](build.rain). Built, they're `bin/buckram.exe`
-and `bin/buckram_core.exe`, which are in the repository, so it runs as it
-is downloaded: nothing needs building first.
+and `bin/buckram_core.exe` for Windows, and `bin/buckram` and
+`bin/buckram_core` for Linux (x86-64), which are in the repository, so it
+runs as it is downloaded: nothing needs building first.
 
 ## Tools
 
@@ -119,6 +120,12 @@ folder as its argument:
 }
 ```
 
+On Linux the command is `bin/buckram` (`"command":
+"/home/you/buckram/bin/buckram"`), which runs `bin/buckram_core` beside it.
+Its tools are the same; a task's programs are Linux's (`sh`, `make`, a
+project's own), and a project that's used on both keeps a `buckram.json`
+each machine writes for itself.
+
 ## Building it
 
 Only after changing `src/`, with the 'rain compiler:
@@ -128,10 +135,13 @@ rain build.rain
 build.exe [path to rain.exe]
 ```
 
-builds `bin/buckram.exe` and `bin/buckram_core.exe`. Windows won't
-overwrite a running exe but will rename one, so one in use is moved into
-`bin/old_exes` first, and runs on from there; those no longer running are
-cleared out the next time. Commit the new exes with the sources.
+builds `bin/buckram.exe` and `bin/buckram_core.exe`, and the Linux ones,
+`bin/buckram` and `bin/buckram_core` (with `-os:linux`, so it needs LLVM's
+clang, as the compiler does for Linux). It's built on Windows, where the
+compiler runs. Windows won't overwrite a running exe but will rename one,
+so one in use is moved into `bin/old_exes` first, and runs on from there;
+those no longer running are cleared out the next time. Commit the new
+programs with the sources.
 
 It speaks MCP over standard input and output, a JSON-RPC message a line,
 and writes only those there; what it has to say otherwise goes to

@@ -64,9 +64,10 @@ A tool's result is an error when its program exits with a code other than
 
 ## Setting it up in a project
 
-1. **Nothing to build:** `bin/buckram.exe` and `bin/buckram_core.exe` are
-   in the repository (build them again only after changing `src/`; see
-   below).
+1. **Nothing to build:** `bin/buckram.exe` and `bin/buckram_core.exe`
+   (Windows), and `bin/buckram` and `bin/buckram_core` (Linux, x86-64),
+   are in the repository (build them again only after changing `src/`;
+   see below).
 2. **Write the project's `buckram.json`**, in its folder, from the commands
    the project's documentation (or its scripts) give for building, testing
    and so on:
@@ -100,8 +101,9 @@ A tool's result is an error when its program exits with a code other than
      }
    }
    ```
-   Keep any servers already there. This is the person's configuration:
-   ask before changing it.
+   On Linux, the command is `bin/buckram` (no `.exe`). Keep any servers
+   already there. This is the person's configuration: ask before changing
+   it.
 4. **Restart the client** so it starts buckram, and check a task and
    `git status` work through it.
 5. **Turn the shells off**, if the person wants (ask first: it's their
@@ -127,12 +129,15 @@ A tool's result is an error when its program exits with a code other than
   answers `initialize`, and for every other message starts
   `bin/buckram_core.exe` afresh in the project's folder with the message as
   its standard input. [src/core.rain](src/core.rain) has the tools.
-  [build.rain](build.rain) builds both into `bin/`, whose exes are
-  committed, so buckram is used as it's downloaded. It's written in 'rain: its
+  [build.rain](build.rain) builds both into `bin/`, for Windows and for
+  Linux, and those programs are committed, so buckram is used as it's
+  downloaded. Code that differs by system is in `#if #OS`, or better, in
+  the modules (System's `processes`, File's `make_writable`). It's written in 'rain: its
   compiler's `AGENTS.md` says how to write it, and `rain -query:module
   Json` (or `System`, `File`, `String`) lists what the modules offer.
 - **Building:** `rain build.rain` once, then `build.exe [path to
-  rain.exe]`. Windows won't overwrite a running exe but will rename one,
+  rain.exe]`, on Windows (the compiler's own system): it builds the Linux
+  programs too, through `-os:linux`. Windows won't overwrite a running exe but will rename one,
   so `build.exe` moves one that's in use into `bin/old_exes` (clearing
   out those no longer running) and builds in its place. Through buckram:
   `run` with program `c:/repos/buckram/build.exe`. Commit the rebuilt exes
@@ -156,7 +161,9 @@ A tool's result is an error when its program exits with a code other than
   line as `input`, with `folder` the project: it answers that one message.
   Use a scratch folder with its own `buckram.json` for tests that change
   tasks, and a scratch repository for the git tool's, so the real ones
-  aren't touched.
+  aren't touched. On Linux, through WSL: `run` with program `wsl.exe`,
+  arguments `-e`, `/mnt/c/repos/buckram/bin/buckram` and the scratch
+  folder's `/mnt/c/...` path, and `input` the session.
 - **Its standard output is only protocol messages,** one a line; anything
   else goes to standard error.
 - **Files are LF only** (`.gitattributes` makes sure): 'rain rejects a CR.

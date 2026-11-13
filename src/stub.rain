@@ -6,7 +6,7 @@
 //     buckram.exe [project folder]      (the folder it's started in, if none)
 //
 // It answers initialize itself. For any other message it starts
-// buckram_core.exe (beside it) afresh, in the project's folder, gives it
+// buckram_core.exe (buckram_core on Linux) beside it afresh, in the project's folder, gives it
 // the message as its standard input, and passes on its answer; so a
 // rebuilt core, or a changed buckram.json, is in use from the next message
 // on, with nothing to restart. Nothing reaches the core on a command line.
@@ -29,7 +29,11 @@
 VERSION :: "0.3.0"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
 INSTRUCTIONS :: "buckram runs programs for you with their arguments as a list, so nothing is quoted, escaped or expanded on the way: a backslash, a $, a % or a quote arrives as you wrote it. Use it instead of a shell. The project's tasks (build, test and the like, from its buckram.json) are tools of their own: prefer one to run when there is one. When you'll run a command more than once or twice and there's no task for it, add one with add_task: it's a tool of its own from your next call (task runs it by name meanwhile), and it's kept in buckram.json for whoever works here next. Use run for a one-off. Use git, not run, for any of git's commands (give a commit's message as message, as it is: it never goes on a command line): before one that can lose uncommitted work, it saves the working tree as a commit, and one that makes a loss permanent (reflog expire, gc --prune, a forced push) runs only with permanent: true, which needs the user's say-so. Every tool refuses a parameter it doesn't have, and names the ones it does. Use edit for several exact replacements that must all happen or none, across one file or many. Each tool gives the exit code, then the output and errors; a program that exits with another code than 0, or runs past its timeout, is an error result. Long output is cut in the middle, and the note where it's cut gives the file that has all of it: read that file for the rest rather than running the program again."
-CORE :: "buckram_core.exe"
+#if #OS == .WINDOWS {
+    CORE :: "buckram_core.exe"
+} #else {
+    CORE :: "buckram_core"
+}
 
 // What's watched for a change: a file's size and when it was written.
 Seen :: struct {
@@ -38,6 +42,7 @@ Seen :: struct {
     modified: Apollo_Time
 }
 
+own_path: string                     // this program's
 core: string                         // the core's path
 config: string                       // buckram.json's
 seen_core: Seen
@@ -48,6 +53,7 @@ main :: (args: [] string) {
     // folder changes).
     *own := args[0]
     if whole := full_path(own) is not os_error { own = whole }
+    own_path = own
     core = join_path(folder_of(own), CORE)
     if args.count > 1 {
         if set_current_folder(args[1]) {
@@ -134,7 +140,7 @@ handle :: (line: string) {
             respond_error(id, -32603, "buckram's core gave no answer (it exited with «code»)")
         }
     } else if absent {
-        respond_error(id, -32603, "buckram's core isn't there: «core» (build it beside buckram.exe)")
+        respond_error(id, -32603, "buckram's core isn't there: «core» (build it beside this, «file_name(own_path)»)")
     } else if os_error {
         respond_error(id, -32603, "buckram's core couldn't be started: «os_error»")
     }

@@ -6,4 +6,7 @@ bin/old_exes/
 *.obj
 *.pdb
 *.ll
+# what the Linux build leaves beside its programs (LLVM's object and IR)
+*.o
+*.llvm.txt
 build/

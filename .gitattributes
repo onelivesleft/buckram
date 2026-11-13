@@ -1,5 +1,7 @@
 # LF line endings everywhere, in the repository and in working copies,
 # regardless of anyone's core.autocrlf setting ('rain rejects a CR).
 * text=auto eol=lf
-# The built exes in bin/, committed as they are.
+# The built programs in bin/ (Windows' and Linux's), committed as they are.
 *.exe binary
+bin/buckram binary
+bin/buckram_core binary

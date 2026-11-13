@@ -11,7 +11,7 @@
 #import "String"
 #import "File"
 #import "Json"
-OS :: #import "OS_Windows"
+#import "System"
 
 files_tool :: (out: *[..] u8, arguments: Json) {
     operation := text_member(arguments, "operation")
@@ -68,7 +68,7 @@ list_files :: (out: *[..] u8, arguments: Json) {
 }
 
 // A folder's entries, or with everything all beneath it.
-entries_of :: (folder: string, everything: bool -> entries: [] Entry) [absent, os_error: OS.Windows_Error] {
+entries_of :: (folder: string, everything: bool -> entries: [] Entry) [absent, os_error: System_Error] {
     entries = ⟨⟩
     if everything {
         if found := all_files(folder) { entries = found } else if absent { fail: absent } else if os_error { fail: os_error = os_error }
@@ -142,7 +142,7 @@ make_folder_for :: (path: string) {
 
 // A folder and all beneath it, copied (replacing files of the same name):
 // how many files.
-copy_folder :: (from: string, to: string -> count: i64) [os_error: OS.Windows_Error] {
+copy_folder :: (from: string, to: string -> count: i64) [os_error: System_Error] {
     count = 0
     if create_folder(to) is os_error { fail: os_error = os_error }
     if entries := all_files(from) {
@@ -164,11 +164,7 @@ copy_folder :: (from: string, to: string -> count: i64) [os_error: OS.Windows_Er
 // A read-only file made writable (as Perforce leaves files), so it can be
 // replaced or deleted.
 clear_read_only :: (path: string) {
-    if attributes := OS.file_attributes(path) is not absent or os_error {
-        if attributes & .READONLY == .READONLY {
-            if OS.set_file_attributes(path, .NORMAL) is absent or os_error { }
-        }
-    }
+    if make_writable(path) is absent or os_error { }
 }
 
 //- delete
@@ -213,27 +209,33 @@ delete_paths :: (out: *[..] u8, arguments: Json) {
 }
 
 // Why a path mustn't be deleted or moved away (it's the project's folder,
-// holds it, or is a drive), or "". By full paths, so ".", ".." and the
-// way it's written don't matter.
+// holds it, or is a drive or /), or "". By full paths, so ".", ".." and
+// the way it's written don't matter.
 kept_whole :: (path: string -> string) {
     whole := comparable_path(path)
     project := comparable_path(config.folder)
+    if whole.count == 0 then return "is /"
     if whole.count <= 2 then return "is a drive"
     if whole == project then return "is the project's folder"
     if starts_with(project, "«whole»/") then return "holds the project's folder"
     return ""
 }
 
-// A path made whole, with /, no / at its end, in lower case.
+// A path made whole, with /, and no / at its end; on Windows, whose paths
+// are the same in any case, in lower case.
 comparable_path :: (path: string -> string) {
     *whole := path
     if full := full_path(path) { whole = full } else if os_error { }
-    return to_lower(trim_end_any(replace(whole, "\\", "/"), "/"))
+    #if #OS == .WINDOWS {
+        return to_lower(trim_end_any(replace(whole, "\\", "/"), "/"))
+    } #else {
+        return trim_end_any(whole, "/")
+    }
 }
 
 // A folder and everything in it, its read-only files included: how many
 // files.
-delete_everything :: (folder: string -> count: i64) [os_error: OS.Windows_Error] {
+delete_everything :: (folder: string -> count: i64) [os_error: System_Error] {
     count = 0
     if entries := all_files(folder) {
         for entry: entries {
@@ -260,9 +262,9 @@ processes_tool :: (out: *[..] u8, arguments: Json) {
         tool_result(out, "processes does list or end (as operation), not '«operation»'", true)
         return
     }
-    *processes: [] OS.Process_Entry
-    if found := OS.process_snapshot() {
-        processes = found
+    *running: [] Process
+    if found := processes() {
+        running = found
     } else if os_error {
         tool_result(out, "the processes can't be listed («os_error»)", true)
         return
@@ -271,9 +273,9 @@ processes_tool :: (out: *[..] u8, arguments: Json) {
     if operation == "list" {
         *text: [..] u8
         *shown := 0
-        for p: processes {
-            if !named_like(p.exe_name, name) then continue
-            append(text, "«p.id»\t«p.parent_id»\t«p.exe_name»\n")
+        for p: running {
+            if !named_like(p.name, name) then continue
+            append(text, "«p.id»\t«p.parent_id»\t«p.name»\n")
             shown += 1
         }
         *which := ""
@@ -293,51 +295,55 @@ processes_tool :: (out: *[..] u8, arguments: Json) {
         }
     }
     if name == "" and ids.count == 0 {
-        tool_result(out, "end needs a name (its program's, such as rain.exe) or ids", true)
+        tool_result(out, "end needs a name (its program's, such as «EXAMPLE_PROGRAM») or ids", true)
         return
     }
     // buckram, and every process above it (the stub, the agent's client):
     // ending one would end the session asking.
     *kept: [..] u32
-    *at := OS.current_process_id()
+    *at := process_id()
     *depth := 0
     while at != 0 and depth < 32 {
         kept.add(at)
         *parent: u32 = 0
-        for p: processes { if p.id == at then parent = p.parent_id }
+        for p: running { if p.id == at then parent = p.parent_id }
         at = parent
         depth += 1
     }
     *text: [..] u8
     *ended := 0
     *failed := false
-    for p: processes {
+    for p: running {
         id := i64'(p.id)
-        *picked := name != "" and equal(p.exe_name, name, .IGNORING_CASE)
+        *picked := name != "" and equal(p.name, name, .IGNORING_CASE)
         for wanted: ids { if wanted == id then picked = true }
         if !picked then continue
         *runs_buckram := false
         for k: kept { if k == p.id then runs_buckram = true }
         if runs_buckram {
-            append(text, "«p.exe_name» («p.id») is buckram, or runs it: left running\n")
+            append(text, "«p.name» («p.id») is buckram, or runs it: left running\n")
             continue
         }
-        if process := OS.open_process(p.id, .TERMINATE) {
-            if OS.terminate_process(process) {
-                append(text, "ended «p.exe_name» («p.id»)\n")
-                ended += 1
-            } else if os_error {
-                append(text, "«p.exe_name» («p.id») can't be ended («os_error»)\n")
+        if end_process(p.id) is {
+            case absent:
+                append(text, "«p.name» («p.id») had ended already\n")
+            case os_error:
+                append(text, "«p.name» («p.id») can't be ended («os_error»)\n")
                 failed = true
-            }
-            OS.close_handle(process)
-        } else if os_error {
-            append(text, "«p.exe_name» («p.id») can't be opened to end it («os_error»)\n")
-            failed = true
+        } else {
+            append(text, "ended «p.name» («p.id»)\n")
+            ended += 1
         }
     }
     if ended == 0 and !failed then append(text, "no process ended: none is named «name», or has those ids\n")
     tool_result(out, string'text, failed)
+}
+
+// A program's name, for examples.
+#if #OS == .WINDOWS {
+    EXAMPLE_PROGRAM :: "rain.exe"
+} #else {
+    EXAMPLE_PROGRAM :: "rain"
 }
 
 // Does the program's name contain the name given (any case)? Any does, for

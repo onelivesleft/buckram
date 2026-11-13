@@ -1,12 +1,13 @@
 // Builds buckram: bin/buckram.exe (the stub, from src/stub.rain) and
-// bin/buckram_core.exe (from src/core.rain), with the 'rain compiler (rain
-// on the PATH, or the one given):
+// bin/buckram_core.exe (from src/core.rain) for Windows, and bin/buckram and
+// bin/buckram_core for Linux (built here, with -os:linux, through LLVM),
+// with the 'rain compiler (rain on the PATH, or the one given):
 //
 //     rain build.rain
 //     build.exe [path to rain.exe]
 //
-// The exes in bin/ are committed, so buckram can be used without building
-// it; build them again after changing src/.
+// The programs in bin/ are committed, so buckram can be used without
+// building it; build them again after changing src/.
 //
 // Windows won't overwrite a running exe, but will rename one, and the stub
 // runs as long as its agent's session: so one in use is moved into
@@ -34,11 +35,13 @@ main :: (args: [] string) [failed: string] {
             if delete_file(entry.path) is absent or os_error { }
         }
     }
-    if build_one(compiler, here, old, "src/stub.rain", "buckram.exe") is failed { fail: failed = failed }
-    if build_one(compiler, here, old, "src/core.rain", "buckram_core.exe") is failed { fail: failed = failed }
+    if build_one(compiler, here, old, "src/stub.rain", "buckram.exe", "windows") is failed { fail: failed = failed }
+    if build_one(compiler, here, old, "src/core.rain", "buckram_core.exe", "windows") is failed { fail: failed = failed }
+    if build_one(compiler, here, old, "src/stub.rain", "buckram", "linux") is failed { fail: failed = failed }
+    if build_one(compiler, here, old, "src/core.rain", "buckram_core", "linux") is failed { fail: failed = failed }
 }
 
-build_one :: (compiler: string, here: string, old: string, source: string, exe: string) [failed: string] {
+build_one :: (compiler: string, here: string, old: string, source: string, exe: string, os: string) [failed: string] {
     target := join_path(here, "bin", exe)
     if file_exists(target) {
         if delete_file(target) is {
@@ -46,8 +49,8 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
             case os_error:
                 // In use: moved aside, to run on from there.
                 *n := 1
-                while file_exists(join_path(old, "«without_extension(exe)»_«n».exe")) { n += 1 }
-                aside := join_path(old, "«without_extension(exe)»_«n».exe")
+                while file_exists(join_path(old, aside_name(exe, n))) { n += 1 }
+                aside := join_path(old, aside_name(exe, n))
                 if rename_file(target, aside) {
                     echo("«exe» is in use: moved to bin/old_exes/«file_name(aside)», where it runs on")
                 } else if absent or os_error {
@@ -55,7 +58,7 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
                 }
         }
     }
-    if code, output, errors := run(compiler, join_path(here, source), "-out:«target»") {
+    if code, output, errors := run(compiler, join_path(here, source), "-os:«os»", "-out:«target»") {
         if code != 0 then fail: failed = "«source» didn't build:\n«output»«errors»"
         echo("built bin/«exe»")
     } else if absent {
@@ -63,4 +66,10 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
     } else if os_error {
         fail: failed = "the compiler couldn't be run («os_error»)"
     }
+}
+
+// The name one moved aside gets: buckram_core_2.exe, or buckram_2.
+aside_name :: (exe: string, n: i64 -> string) {
+    if extension(exe) == "" then return "«exe»_«n»"
+    return "«without_extension(exe)»_«n».«extension(exe)»"
 }
