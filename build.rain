@@ -60,6 +60,11 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
     }
     if code, output, errors := run(compiler, join_path(here, source), "-os:«os»", "-out:«target»") {
         if code != 0 then fail: failed = "«source» didn't build:\n«output»«errors»"
+        // What a build through LLVM leaves beside it (its IR, object, and
+        // clang's messages): not buckram's.
+        for leftover: [] string⟨".ll", ".o", ".llvm.txt"⟩ {
+            if delete_file("«target»«leftover»") is absent or os_error { }
+        }
         echo("built bin/«exe»")
     } else if absent {
         fail: failed = "there's no compiler '«compiler»': give its path, build.exe C:/rain/build/rain.exe"
