@@ -55,10 +55,12 @@ runs as it is downloaded: nothing needs building first.
   an agent finds it needs while it works. They're written into
   `buckram.json` (laid out to read, so a change shows in `git diff`).
 
-Each call is logged, a JSON object a line, in `output_folder/calls.jsonl`:
-when, the tool and its arguments, how long it took, whether it was an
-error, and how big its result was. It shows which jobs an agent does often
-enough to be a task, or a tool of buckram's own.
+Each call is logged, a JSON object a line, in
+`output_folder/calls.<machine>.jsonl` (the machine and its system,
+`dolly-windows` say, as two can share a project's folder: a VM's shared
+folder, or WSL): when, the tool and its arguments, how long it took,
+whether it was an error, and how big its result was. It shows which jobs
+an agent does often enough to be a task, or a tool of buckram's own.
 
 A tool refuses a parameter it doesn't have, naming those it has, and one
 of the wrong type (a number in `arguments`, `"true"` for `permanent`, a
@@ -68,7 +70,7 @@ edit with a field it doesn't have, or without `file`, `old` or `new`.
 
 Each gives back the exit code, then the output and errors. Past
 `output_limit` bytes (8192 by default) the middle is cut, at a character's
-start, and the whole of it is kept in `output_folder/<tool>.txt`. A tool
+start, and the whole of it is kept in `output_folder/<tool>.<machine>.txt`. A tool
 whose program exits with a code other than 0, or runs past its timeout, is
 an error result.
 
@@ -87,7 +89,15 @@ an error result.
 ```
 
 A task's `run` is the program and its arguments; a program given as a
-path is the project's. Its `arguments` is `"none"` (the default) or
+path is the project's. It's one command for every system, or one for
+each: `"run": {"windows": ["cmd", "/c", ".\\build.bat"], "linux":
+["./build.sh"]}`. A task with no command for the system buckram runs on
+isn't one of its tools there (the `task` tool names it, and which systems
+it's for), so a project's folder shared between systems offers each its
+own. `add_task` writes this system's command into a task that has one
+for each, keeping the other's, and otherwise the one command;
+`remove_task` takes this system's out of a task that has one for each,
+and otherwise the whole task. Its `arguments` is `"none"` (the default) or
 `"list"`, for a tool that takes a list of strings to add after them. Its
 `timeout` is in seconds (600 by default), and a call can give its own (a
 number, or a string of one). A task can't have the name of one of

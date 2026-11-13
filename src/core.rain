@@ -31,9 +31,11 @@
 //
 // What a program writes comes back as its exit code, then its output and
 // errors, cut in the middle past output_limit bytes (the whole of it is
-// kept in output_folder, under the tool's name).
+// kept in output_folder, under the tool's name and the machine's).
 //
-// Each call is logged, a JSON object a line, in output_folder/calls.jsonl:
+// Each call is logged, a JSON object a line, in
+// output_folder/calls.<machine>.jsonl (dolly-windows: the machine and its
+// system, as two may share the project's folder):
 // when, the tool, its arguments, how long it took, whether it was an
 // error, and how big its result was. Read, it shows which jobs come up
 // often enough to be a task, or a tool of buckram's own.
@@ -49,6 +51,10 @@
 //                    "arguments": "list", "timeout": 900 }
 //       }
 //     }
+//
+// A task's run is one command for every system, or one for each: "run":
+// {"windows": [...], "linux": [...]}. One with none for this system isn't a
+// tool here (the task tool names it).
 //
 // A task's "arguments" is "none" (the default) or "list": then the tool
 // takes a list of strings, added after its run. Its timeout is in seconds
@@ -92,7 +98,24 @@ Config :: struct {
     folder: string               // the project's (the one buckram was started in)
     output_limit: i64
     output_folder: string        // relative to folder
-    tasks: [] Task
+    machine: string              // this machine and system (dolly-windows), in the names of what's kept in output_folder
+    tasks: [] Task               // those with a command for this system
+    elsewhere: [] Elsewhere      // those with commands only for others
+}
+
+// A task with commands only for other systems, so not one of this one's.
+Elsewhere :: struct {
+    name: string
+    systems: string              // which: "windows", say
+}
+
+// The system a task's run can name, this one and the other.
+#if #OS == .WINDOWS {
+    THIS_SYSTEM :: "windows"
+    OTHER_SYSTEM :: "linux"
+} #else {
+    THIS_SYSTEM :: "linux"
+    OTHER_SYSTEM :: "windows"
 }
 
 config: Config
@@ -119,7 +142,9 @@ load_config :: (-> loaded: Config) {
     loaded.folder = current_folder()
     loaded.output_limit = 8192
     loaded.output_folder = "build/buckram"
+    loaded.machine = machine_name()
     *tasks: [..] Task
+    *elsewhere: [..] Elsewhere
     if contents := read_file(join_path(loaded.folder, CONFIG_FILE)) is {
         case absent:
         case os_error:
@@ -141,7 +166,13 @@ load_config :: (-> loaded: Config) {
                             log("the task '«name»' has the name of one of buckram's own tools, so it's left out")
                             continue
                         }
-                        if task := read_task(name, object.values[i]) { tasks.add(task) } else if bad_task { log("the task '«name»': «bad_task»") }
+                        if task := read_task(name, object.values[i]) {
+                            tasks.add(task)
+                        } else if bad_task {
+                            log("the task '«name»': «bad_task»")
+                        } else if only_for {
+                            elsewhere.add(⟨name, only_for⟩)
+                        }
                     }
                 }
             }
@@ -150,9 +181,14 @@ load_config :: (-> loaded: Config) {
         }
     }
     loaded.tasks = tasks
+    loaded.elsewhere = elsewhere
 }
 
-read_task :: (name: string, value: Json -> task: Task) [bad_task: string] {
+// A task, with its command for this system: its run is one command for
+// every system (a list), or one for each (an object of "windows" and
+// "linux" lists). One with commands only for others fails with only_for,
+// which they are.
+read_task :: (name: string, value: Json -> task: Task) [bad_task: string, only_for: string] {
     task = ⟨⟩
     task.name = name
     task.timeout = DEFAULT_TIMEOUT
@@ -160,9 +196,28 @@ read_task :: (name: string, value: Json -> task: Task) [bad_task: string] {
     *command: [..] string
     if run := member(value, "run") is not absent {
         if run is list {
-            for piece: list {
-                if piece is text { command.add(text) } else { fail: bad_task = "its run is a list of strings, the program first" }
+            if !strings_of(list, command) then fail: bad_task = "its run is a list of strings, the program first"
+        } else if run is object {
+            *systems: [..] u8
+            for system, i: object.names {
+                // (built in the global arena: a frame string here would
+                // make the region checks take task to be in the frame too)
+                if system != "windows" and system != "linux" then fail: bad_task = `global #"its run's systems are "windows" and "linux", not "«system»""#
+                given := object.values[i]
+                *pieces: [..] string
+                *good := false
+                if given is list { good = strings_of(list, pieces) and pieces.count > 0 }
+                if !good then fail: bad_task = `global "its run for «system» is a list of strings, the program first"
+                if system == THIS_SYSTEM {
+                    for piece: pieces { command.add(piece) }
+                } else {
+                    if systems.count > 0 then append(systems, ", ")
+                    append(systems, system)
+                }
             }
+            if command.count == 0 and systems.count > 0 then fail: only_for = string'systems
+        } else {
+            fail: bad_task = "its run is a list of strings (the program first), or an object of them by system: {\"windows\": [...], \"linux\": [...]}"
         }
     }
     if command.count == 0 then fail: bad_task = "it needs a run: the program and its arguments, as a list of strings"
@@ -175,6 +230,53 @@ read_task :: (name: string, value: Json -> task: Task) [bad_task: string] {
             if t := to_f64(number) is not invalid { task.timeout = t }
         }
     }
+}
+
+// The items, if they're all strings, added to the list.
+strings_of :: (items: [] Json, into: *[..] string -> bool) {
+    for item: items {
+        if item is text { into.add(text) } else { return false }
+    }
+    return true
+}
+
+// This machine and system (dolly-windows, say), for the names of what's
+// kept in output_folder, as two may share a project's folder (a VM's
+// shared folder, or WSL, which shares Windows' name).
+machine_name :: (-> string) {
+    *host := ""
+    #if #OS == .WINDOWS {
+        if name := environment("COMPUTERNAME") { host = name } else if absent or os_error { }
+    } #else {
+        if name := read_file("/proc/sys/kernel/hostname") { host = trim(name) } else if absent or os_error { }
+    }
+    *out: [..] u8
+    for c: to_lower(host) {
+        if (c >= "a" and c <= "z") or (c >= "0" and c <= "9") or c == "-" or c == "_" { out.add(c) } else { out.add("_") }
+    }
+    if out.count == 0 then append(out, "unknown")
+    append(out, "-«THIS_SYSTEM»")
+    return string'out
+}
+
+// The tasks with commands only for other systems, as text ("build
+// (windows), test (windows)"), or "".
+elsewhere_names :: (-> string) {
+    *names: [..] u8
+    for e, i: config.elsewhere {
+        if i > 0 then append(names, ", ")
+        append(names, "«e.name» («e.systems»)")
+    }
+    return string'names
+}
+
+// Why there's no task of the name here: it has commands only for other
+// systems, or there's none.
+no_task :: (name: string -> string) {
+    for e: config.elsewhere {
+        if e.name == name then return "the task '«name»' has no command for «THIS_SYSTEM», only for «e.systems»: add one with add_task, or run what it would by hand"
+    }
+    return "there's no task '«name»' in «CONFIG_FILE» (its tasks for «THIS_SYSTEM»: «task_names()»)"
 }
 
 // A member that's a string, or "".
@@ -278,13 +380,15 @@ list_tools :: (out: *[..] u8) {
         append(names, task.name)
     }
     if names.count == 0 then append(names, "none yet")
-    tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now: «string'names».",
+    *others := ""
+    if config.elsewhere.count > 0 then others = " Tasks with commands only for other systems, so not here: «elsewhere_names()»."
+    tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now, for «THIS_SYSTEM»: «string'names».«others»",
          #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}},"required":["name"]}"#)
     append(out, ",")
-    tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
+    tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. A task that has a command for each system («THIS_SYSTEM» and «OTHER_SYSTEM») gets this one's, the other's kept; any other is one command for every system. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
          #"{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"run":«ARGUMENTS_SCHEMA»,"arguments":{"type":"string","enum":["none","list"]},"timeout":{"type":"number"}},"required":["name","run"]}"#)
     append(out, ",")
-    tool(out, "remove_task", "Takes a task out of the project's buckram.json.",
+    tool(out, "remove_task", "Takes a task out of the project's buckram.json: from a task with a command for each system, only this one's («THIS_SYSTEM»'s), and the task once it has none.",
          #"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#)
     for task: config.tasks {
         append(out, ",")
@@ -319,7 +423,7 @@ call_tool :: (out: *[..] u8, params: Json) {
 
 ERROR_RESULT_END :: #""isError":true}"#
 
-// The call's line in output_folder/calls.jsonl.
+// The call's line in output_folder/calls.<machine>.jsonl.
 record_call :: (name: string, arguments: Json, took: Apollo_Time, result: string) {
     folder := join_path(config.folder, config.output_folder)
     if !folder_exists(folder) { if create_folder(folder) is os_error { } }
@@ -333,7 +437,7 @@ record_call :: (name: string, arguments: Json, took: Apollo_Time, result: string
     append(line, #","arguments":"#)
     write_json(line, arguments)
     append(line, #","ms":«ms»,"error":«ends_with(result, ERROR_RESULT_END)»,"bytes":«result.count»}"#, "\n")
-    if append_file(join_path(folder, "calls.jsonl"), string'line) is absent or os_error { }
+    if append_file(join_path(folder, "calls.«config.machine».jsonl"), string'line) is absent or os_error { }
 }
 
 call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
@@ -355,7 +459,7 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
                 return
             }
         }
-        tool_result(out, "there's no task '«wanted»' in «CONFIG_FILE» (its tasks: «task_names()»)", true)
+        tool_result(out, no_task(wanted), true)
         return
     }
     for task: config.tasks {
@@ -363,6 +467,12 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
             *parameters := "timeout:seconds"
             if task.takes == .LIST then parameters = "arguments:texts timeout:seconds"
             if takes_only(out, name, arguments, parameters) then run_task(out, task, arguments)
+            return
+        }
+    }
+    for e: config.elsewhere {
+        if e.name == name {
+            tool_result(out, no_task(name), true)
             return
         }
     }
@@ -628,8 +738,29 @@ add_task_tool :: (out: *[..] u8, arguments: Json) {
     }
     *pieces: [..] Json
     for piece: run { pieces.add(Json.text(piece)) }
+    *file: Json
+    if read := read_config_file() { file = read } else if bad_config {
+        tool_result(out, bad_config, true)
+        return
+    }
+    *tasks := Json_Object⟨⟩
+    if listed := member(file, "tasks") is not absent { tasks = as_object(listed) }
+    // Its run: this system's command, in a task with one for each (the
+    // other's kept); or else its one command.
+    *run_value := Json.list(pieces)
+    *how := "added to «CONFIG_FILE»"
+    if existing := member(Json.object(tasks), name) is not absent {
+        how = "replaced in «CONFIG_FILE»"
+        if old_run := member(existing, "run") is not absent {
+            if old_run is object {
+                run_value = Json.object(with_member(object, THIS_SYSTEM, Json.list(pieces), false))
+                how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM»"
+                for system: object.names { if system == OTHER_SYSTEM then how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM» («OTHER_SYSTEM» keeps its own command)" }
+            }
+        }
+    }
     names.add("run")
-    values.add(Json.list(pieces))
+    values.add(run_value)
     if takes == "list" {
         names.add("arguments")
         values.add(Json.text("list"))
@@ -641,46 +772,53 @@ add_task_tool :: (out: *[..] u8, arguments: Json) {
         }
     }
     task := Json.object(⟨names, values⟩)
-    *replaced := false
-    for existing: config.tasks { if existing.name == name then replaced = true }
-    if file := read_config_file() {
-        *tasks := Json_Object⟨⟩
-        if listed := member(file, "tasks") is not absent { tasks = as_object(listed) }
-        updated := Json.object(with_member(as_object(file), "tasks", Json.object(with_member(tasks, name, task, false)), false))
-        if write_config_file(updated) is bad_config {
-            tool_result(out, bad_config, true)
-            return
-        }
-    } else if bad_config {
+    updated := Json.object(with_member(as_object(file), "tasks", Json.object(with_member(tasks, name, task, false)), false))
+    if write_config_file(updated) is bad_config {
         tool_result(out, bad_config, true)
         return
     }
-    *how := "added"
-    if replaced then how = "replaced"
-    tool_result(out, "the task '«name»' is «how» in «CONFIG_FILE». It's a tool of its own once the client lists buckram's tools again (buckram has told it they've changed); until then, task with name '«name»' runs it.", false)
+    tool_result(out, "the task '«name»' is «how». It's a tool of its own once the client lists buckram's tools again (buckram has told it they've changed); until then, task with name '«name»' runs it.", false)
 }
 
 remove_task_tool :: (out: *[..] u8, arguments: Json) {
     name := text_member(arguments, "name")
-    *found := false
-    for existing: config.tasks { if existing.name == name then found = true }
-    if !found {
-        tool_result(out, "there's no task '«name»' in «CONFIG_FILE» (its tasks: «task_names()»)", true)
-        return
-    }
-    if file := read_config_file() {
-        *tasks := Json_Object⟨⟩
-        if listed := member(file, "tasks") is not absent { tasks = as_object(listed) }
-        updated := Json.object(with_member(as_object(file), "tasks", Json.object(with_member(tasks, name, ⟨⟩, true)), false))
-        if write_config_file(updated) is bad_config {
-            tool_result(out, bad_config, true)
-            return
-        }
-    } else if bad_config {
+    *file: Json
+    if read := read_config_file() { file = read } else if bad_config {
         tool_result(out, bad_config, true)
         return
     }
-    tool_result(out, "the task '«name»' is taken out of «CONFIG_FILE»", false)
+    *tasks := Json_Object⟨⟩
+    if listed := member(file, "tasks") is not absent { tasks = as_object(listed) }
+    *existing: Json
+    if found := member(Json.object(tasks), name) { existing = found } else if absent {
+        tool_result(out, "there's no task '«name»' in «CONFIG_FILE» (its tasks for «THIS_SYSTEM»: «task_names()»)", true)
+        return
+    }
+    // From a task with a command for each system, only this one's; any
+    // other goes whole.
+    *updated_tasks := with_member(tasks, name, ⟨⟩, true)
+    *how := "taken out of «CONFIG_FILE»"
+    if run := member(existing, "run") is not absent {
+        if run is object {
+            *has_this := false
+            for system: object.names { if system == THIS_SYSTEM then has_this = true }
+            if !has_this {
+                tool_result(out, "the task '«name»' has no command for «THIS_SYSTEM», so it's left as it is (its commands are for «join(object.names, ", ")»)", true)
+                return
+            }
+            rest := with_member(object, THIS_SYSTEM, ⟨⟩, true)
+            if rest.names.count > 0 {
+                updated_tasks = with_member(tasks, name, Json.object(with_member(as_object(existing), "run", Json.object(rest), false)), false)
+                how = "taken out of «CONFIG_FILE» for «THIS_SYSTEM» («join(rest.names, ", ")» keeps its command)"
+            }
+        }
+    }
+    updated := Json.object(with_member(as_object(file), "tasks", Json.object(updated_tasks), false))
+    if write_config_file(updated) is bad_config {
+        tool_result(out, bad_config, true)
+        return
+    }
+    tool_result(out, "the task '«name»' is «how»", false)
 }
 
 run_tool :: (out: *[..] u8, arguments: Json) {
@@ -1030,7 +1168,7 @@ limited :: (tool_name: string, text: string -> string) {
     if text.count <= config.output_limit then return text
     folder := join_path(config.folder, config.output_folder)
     if !folder_exists(folder) { if create_folder(folder) is os_error { } }
-    path := join_path(folder, "«tool_name».txt")
+    path := join_path(folder, "«tool_name».«config.machine».txt")
     *kept := "(it couldn't be kept)"
     if write_file(path, text) is not absent or os_error then kept = "all of it is in «path»"
     half := config.output_limit / 2

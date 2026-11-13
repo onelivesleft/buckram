@@ -54,13 +54,15 @@ do; in short:
   those three, is refused before anything is written.
 - **Long output** is cut in the middle past `output_limit` bytes; the
   note at the cut names the file with all of it
-  (`output_folder/<tool>.txt`). Read that file rather than running the
+  (`output_folder/<tool>.<machine>.txt`). Read that file rather than running the
   program again.
 
 A tool's result is an error when its program exits with a code other than
 0 or runs past its timeout; the output is still there.
 
-- **The call log:** every call is a line of `output_folder/calls.jsonl`
+- **The call log:** every call is a line of
+  `output_folder/calls.<machine>.jsonl`, the machine and its system
+  (`dolly-windows`), so machines sharing a folder keep apart
   (`{"time", "tool", "arguments", "ms", "error", "bytes"}`). Read it now and
   then for what repeats (the same `run`, a chain of calls that's one job)
   and propose a task, or a tool of buckram's own, for it.
@@ -87,7 +89,10 @@ A tool's result is an error when its program exits with a code other than
    }
    ```
    A task's `run` is the program and its arguments (a program given as a
-   path is the project's); `arguments` is `"none"` or `"list"` (more
+   path is the project's): one command for every system, or one for each,
+   `"run": {"windows": [...], "linux": [...]}`, for a project whose
+   folder more than one system uses (a task with none for this system
+   isn't offered here; `task`'s description names it); `arguments` is `"none"` or `"list"` (more
    arguments added after its own); `timeout` is in seconds (600 by
    default; a call can give its own). Say in each
    description what it gives back and what arguments it takes, since
