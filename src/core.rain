@@ -789,14 +789,69 @@ Changed :: struct {
     made: bool              // a new file
 }
 
+// The kth edit, checked as the tool's own parameters are: its fields known,
+// file, old and new given as text (file not empty; old empty to make a new
+// file), and count, if given, a whole number of times, 1 or more. Gives
+// the error, or "".
+read_edit :: (item: Json, k: i64 -> e: Edit, error: string) {
+    e = ⟨"", "", "", 1⟩
+    error = ""
+    if item is object {
+        for given: object.names {
+            if given != "file" and given != "old" and given != "new" and given != "count" {
+                error = "edit «k» has no field '«given»': an edit's fields are file, old, new and count"
+                return
+            }
+        }
+    } else {
+        error = "edit «k» isn't an object: each is {file, old, new}, with count if not 1"
+        return
+    }
+    for name: [] string⟨"file", "old", "new"⟩ {
+        if found := member(item, name) {
+            if found is text {
+                if name == "file" then e.file = text
+                if name == "old" then e.old = text
+                if name == "new" then e.new = text
+            } else {
+                error = "edit «k»'s «name» isn't text"
+                return
+            }
+        } else if absent {
+            error = #"edit «k» has no «name»: each edit is {file, old, new}, with count if not 1, and an old of "" makes a new file"#
+            return
+        }
+    }
+    if e.file == "" {
+        error = "edit «k»'s file is empty: give the file's path"
+        return
+    }
+    if found := member(item, "count") is not absent {
+        *ok := false
+        if found is number {
+            if n := to_i64(number) is not invalid or too_big {
+                if n >= 1 {
+                    e.count = n
+                    ok = true
+                }
+            }
+        }
+        if !ok {
+            error = "edit «k»'s count is how many times its old text is in the file: a whole number, 1 or more"
+            return
+        }
+    }
+}
+
 edit_tool :: (out: *[..] u8, arguments: Json) {
     *edits: [..] Edit
     if given := member(arguments, "edits") is not absent {
         if given is list {
-            for item: list {
-                *e := Edit⟨text_member(item, "file"), text_member(item, "old"), text_member(item, "new"), 1⟩
-                if c := member(item, "count") is not absent {
-                    if c is number { if n := to_i64(number) is not invalid or too_big { e.count = n } }
+            for item, i: list {
+                e, error := read_edit(item, i + 1)
+                if error != "" {
+                    tool_result(out, "«error» (nothing was written)", true)
+                    return
                 }
                 edits.add(e)
             }

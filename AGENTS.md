@@ -47,8 +47,10 @@ do; in short:
   or `end` some (`name`, a program such as `rain.exe`, or `ids`); never
   buckram or what started it.
 - **`edit`** for several exact replacements that must all happen or none:
-  each edit's old text must be in its file exactly `count` times (1 by
-  default). An empty old text makes a new file.
+  each edit is `{file, old, new}`, and its old text must be in its file
+  exactly `count` times (1 by default). An empty old text makes a new
+  file. An edit with another field (`path`, say), or without one of
+  those three, is refused before anything is written.
 - **Long output** is cut in the middle past `output_limit` bytes; the
   note at the cut names the file with all of it
   (`output_folder/<tool>.txt`). Read that file rather than running the

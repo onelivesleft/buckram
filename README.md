@@ -61,7 +61,8 @@ error, and how big its result was. It shows which jobs an agent does often
 enough to be a task, or a tool of buckram's own.
 
 A tool refuses a parameter it doesn't have, naming those it has, rather
-than dropping it without a word.
+than dropping it without a word; and `edit` refuses an edit with a field
+it doesn't have, or without `file`, `old` or `new`.
 
 Each gives back the exit code, then the output and errors. Past
 `output_limit` bytes (8192 by default) the middle is cut, at a character's
