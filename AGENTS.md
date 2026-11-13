@@ -21,11 +21,23 @@ do; in short:
   takes one out. A task's name is letters, digits and `_`.
 - **`run` for a one-off**: a program (a path, or a name on the PATH), its
   arguments as a list, and if needed `folder`, `input` (all of its
-  standard input) and `timeout` (seconds, 600 by default).
-- **`git`** for `status`, `diff`, `log`, `show`, `add` and `commit`, with
-  more arguments as a list. Give a commit's message as `message`, exactly
-  as it should be: it goes to git as its input. Nothing that rewrites or
-  discards history or work is offered; ask the person to do that.
+  standard input) and `timeout` (seconds, 600 by default; it ends what the
+  program started too). A task takes a `timeout` too, for one call. Not
+  for git: `run` refuses it.
+- **`git`** for any of git's commands: `operation` (`status`, `diff`,
+  `log`, `add`, `commit`, `checkout`, `stash`, ...), more arguments as a
+  list, and `folder` for a repository other than the project. Give a
+  commit's message as `message`, exactly as it should be: it goes to git
+  as its input. Before a command that can lose uncommitted work, buckram
+  saves the working tree (untracked files too, not ignored ones) as a
+  commit, `refs/buckram/saved/<when>`, without touching it or the index,
+  and the result begins with its hash: `git restore --source=<hash> --
+  <path>` brings a file back. A command that makes a loss permanent
+  (`reflog expire`/`delete`, `gc --prune`, `prune`, a forced push or a
+  deleted remote branch) runs only with `"permanent": true`: ask the
+  person first, every time.
+- **A parameter a tool hasn't** is refused, with the ones it has: read
+  the error, don't drop the parameter blindly.
 - **`files`** to list, copy, move or delete files and folders, rather than
   a program written for it: `operation` `list` (`path`, `all`), `copy` or
   `move` (`from`, `to`: a file or a whole folder), `delete` (`paths`; a
@@ -64,15 +76,16 @@ A tool's result is an error when its program exits with a code other than
      "output_folder": "build/buckram",
      "tasks": {
        "build": { "description": "Builds it: errors and warnings, or \"built\".",
-                  "run": ["python", "tools/build.py"] },
+                  "run": ["tools/build.exe"] },
        "test":  { "description": "Runs the tests; given names, only those.",
-                  "run": ["python", "tools/test.py"], "arguments": "list", "timeout": 900 }
+                  "run": ["build/tests.exe"], "arguments": "list", "timeout": 900 }
      }
    }
    ```
    A task's `run` is the program and its arguments (a program given as a
    path is the project's); `arguments` is `"none"` or `"list"` (more
-   arguments added after its own); `timeout` is in seconds. Say in each
+   arguments added after its own); `timeout` is in seconds (600 by
+   default; a call can give its own). Say in each
    description what it gives back and what arguments it takes, since
    that's what the next agent reads. Call real programs, not `.bat` or
    `.cmd` files: those go through `cmd.exe`, which parses their command
@@ -135,12 +148,15 @@ A tool's result is an error when its program exits with a code other than
   {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}
   {"jsonrpc":"2.0","method":"notifications/initialized"}
   {"jsonrpc":"2.0","id":1,"method":"tools/list"}
-  {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run","arguments":{"program":"python","arguments":["-c","print(1)"]}}}
+  {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run","arguments":{"program":"cmd","arguments":["/c","echo","1"]}}}
   ```
   through `run` (program `c:/repos/buckram/bin/buckram.exe`, arguments the
-  project folder, `input` the session). Use a scratch folder with its own
-  `buckram.json` for tests that change tasks, so the real one isn't
-  touched.
+  project folder, `input` the session). Or build a core of your own
+  (`rain src/core.rain -out:scratch/core.exe`) and give it one `tools/call`
+  line as `input`, with `folder` the project: it answers that one message.
+  Use a scratch folder with its own `buckram.json` for tests that change
+  tasks, and a scratch repository for the git tool's, so the real ones
+  aren't touched.
 - **Its standard output is only protocol messages,** one a line; anything
   else goes to standard error.
 - **Files are LF only** (`.gitattributes` makes sure): 'rain rejects a CR.

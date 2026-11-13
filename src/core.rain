@@ -13,8 +13,12 @@
 //
 // Its tools:
 //   run          a program, with its arguments, folder, input and timeout
-//   git          status, diff, log, show, add and commit (a commit's message
-//                is given as text, never on a command line)
+//                (but git, which goes through git)
+//   git          any of git's commands, in the project or a folder (a
+//                commit's message is given as text, never on a command line);
+//                before one that can lose uncommitted work, the working tree
+//                is saved as a commit, and one that makes a loss permanent
+//                takes "permanent": true
 //   edit         exact replacements in files, all or none
 //   files        list, copy, move and delete files and folders (files.rain)
 //   processes    list running processes, or end them (files.rain)
@@ -39,15 +43,19 @@
 //       "output_limit": 8192,
 //       "output_folder": "build/buckram",
 //       "tasks": {
-//         "build": { "description": "Builds the compiler.", "run": ["python", "tools/dev.py", "build"] },
-//         "test":  { "description": "Runs the tests.", "run": ["python", "tools/dev.py", "test"],
+//         "build": { "description": "Builds the compiler.", "run": ["cmd", "/c", ".\\build.bat"] },
+//         "test":  { "description": "Runs the tests.", "run": ["build/rain.exe", "-test:tests"],
 //                    "arguments": "list", "timeout": 900 }
 //       }
 //     }
 //
 // A task's "arguments" is "none" (the default) or "list": then the tool
 // takes a list of strings, added after its run. Its timeout is in seconds
-// (600 by default).
+// (600 by default), and a call can give its own. A timeout ends what the
+// program started too.
+//
+// Every tool refuses a parameter it hasn't (naming those it has), rather
+// than dropping it without a word.
 
 #import "Console"
 #import "String"
@@ -58,10 +66,13 @@
 
 #load "files.rain"
 
-VERSION :: "0.1.0"
+VERSION :: "0.2.0"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
 DEFAULT_TIMEOUT : f64 : 600
-GIT_COMMANDS :: [] string ⟨"status", "diff", "log", "show", "add", "commit"⟩
+// git's commands that only look, or only add to what's kept (add, commit,
+// fetch, tag, branch, ...): nothing they do can lose work, so nothing is
+// saved before them.
+LOOKING :: "status diff log show add commit grep ls-files ls-tree cat-file rev-parse rev-list merge-base for-each-ref blame describe shortlog fetch remote tag branch notes config help version check-ignore count-objects fsck name-rev show-ref symbolic-ref var whatchanged range-diff format-patch archive bundle verify-commit verify-tag"
 OWN_TOOLS :: [] string ⟨"run", "git", "edit", "files", "processes", "task", "add_task", "remove_task"⟩
 CONFIG_FILE :: "buckram.json"
 
@@ -244,11 +255,11 @@ ARGUMENTS_SCHEMA :: #"{"type":"array","items":{"type":"string"}}"#
 
 list_tools :: (out: *[..] u8) {
     append(out, #"{"tools":["#)
-    tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default). Gives its exit code, output and errors.",
+    tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default; it ends what the program started too). Gives its exit code, output and errors. Not git: that's the git tool's.",
          #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"timeout":{"type":"number"}},"required":["program"]}"#)
     append(out, ",")
-    tool(out, "git", "Runs git in the project: status, diff, log, show, add or commit, with more arguments as a list. A commit takes its message as message (given to git as its input, never on a command line). Nothing that rewrites or discards history or work (push, reset, checkout, rebase, clean) is offered.",
-         #"{"type":"object","properties":{"command":{"type":"string","enum":["status","diff","log","show","add","commit"]},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"}},"required":["command"]}"#)
+    tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/*). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
+         #"{"type":"object","properties":{"operation":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"},"folder":{"type":"string"},"permanent":{"type":"boolean"}},"required":["operation"]}"#)
     append(out, ",")
     tool(out, "edit", #"Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text ("") that doesn't exist is made with new as its contents. Paths are the project's."#,
          #"{"type":"object","properties":{"edits":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"},"count":{"type":"integer"}},"required":["file","old","new"]}}},"required":["edits"]}"#)
@@ -265,8 +276,8 @@ list_tools :: (out: *[..] u8) {
         append(names, task.name)
     }
     if names.count == 0 then append(names, "none yet")
-    tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them: the way to run a task added since the tools were last listed. Its tasks now: «string'names».",
-         #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»},"required":["name"]}"#)
+    tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now: «string'names».",
+         #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}},"required":["name"]}"#)
     append(out, ",")
     tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
          #"{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"run":«ARGUMENTS_SCHEMA»,"arguments":{"type":"string","enum":["none","list"]},"timeout":{"type":"number"}},"required":["name","run"]}"#)
@@ -278,10 +289,10 @@ list_tools :: (out: *[..] u8) {
         *description := task.description
         if description == "" then description = "Runs the project's task '«task.name»'."
         if task.takes == .LIST {
-            tool(out, task.name, "«description» Arguments given as a list are added after its own.",
-                 #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»}}"#)
+            tool(out, task.name, "«description» Arguments given as a list are added after its own. It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.",
+                 #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}}}"#)
         } else {
-            tool(out, task.name, description, #"{"type":"object","properties":{}}"#)
+            tool(out, task.name, "«description» It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.", #"{"type":"object","properties":{"timeout":{"type":"number"}}}"#)
         }
     }
     append(out, "]}")
@@ -324,14 +335,17 @@ record_call :: (name: string, arguments: Json, took: Apollo_Time, result: string
 }
 
 call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
-    if name == "run" { run_tool(out, arguments); return }
-    if name == "git" { git_tool(out, arguments); return }
-    if name == "edit" { edit_tool(out, arguments); return }
-    if name == "files" { files_tool(out, arguments); return }
-    if name == "processes" { processes_tool(out, arguments); return }
-    if name == "add_task" { add_task_tool(out, arguments); return }
-    if name == "remove_task" { remove_task_tool(out, arguments); return }
+    // Each tool's parameters: one it hasn't is refused, rather than
+    // dropped without a word.
+    if name == "run" { if takes_only(out, name, arguments, "program arguments folder input timeout") then run_tool(out, arguments); return }
+    if name == "git" { if takes_only(out, name, arguments, "operation command arguments message folder permanent") then git_tool(out, arguments); return }
+    if name == "edit" { if takes_only(out, name, arguments, "edits") then edit_tool(out, arguments); return }
+    if name == "files" { if takes_only(out, name, arguments, "operation path all from to paths") then files_tool(out, arguments); return }
+    if name == "processes" { if takes_only(out, name, arguments, "operation name ids") then processes_tool(out, arguments); return }
+    if name == "add_task" { if takes_only(out, name, arguments, "name description run arguments timeout") then add_task_tool(out, arguments); return }
+    if name == "remove_task" { if takes_only(out, name, arguments, "name") then remove_task_tool(out, arguments); return }
     if name == "task" {
+        if !takes_only(out, name, arguments, "name arguments timeout") then return
         wanted := text_member(arguments, "name")
         for task: config.tasks {
             if task.name == wanted {
@@ -344,11 +358,51 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
     }
     for task: config.tasks {
         if task.name == name {
-            run_task(out, task, arguments)
+            *parameters := "timeout"
+            if task.takes == .LIST then parameters = "arguments timeout"
+            if takes_only(out, name, arguments, parameters) then run_task(out, task, arguments)
             return
         }
     }
     tool_result(out, "there's no tool '«name»'", true)
+}
+
+// Does the call give only parameters the tool has (names, separated by
+// spaces)? If not, its error is the result.
+takes_only :: (out: *[..] u8, tool_name: string, arguments: Json, names: string -> bool) {
+    if arguments is object {
+        for given: object.names {
+            *known := false
+            for name: split(names, " ") { if name == given then known = true }
+            if !known {
+                tool_result(out, "«tool_name» has no parameter '«given»' (its parameters: «replace(names, " ", ", ")»)", true)
+                return false
+            }
+        }
+    }
+    return true
+}
+
+// Seconds as text: 600, or 0.5.
+seconds_text :: (seconds: f64 -> string) {
+    whole := i64'seconds
+    if f64'whole == seconds then return "«whole»"
+    return "«seconds»"
+}
+
+// A number of seconds: given as a number, or a string of one (as agents
+// often give it); the fallback when it isn't given.
+seconds_member :: (value: Json, name: string, fallback: f64 -> seconds: f64) [bad_seconds: string] {
+    seconds = fallback
+    if found := member(value, name) is not absent {
+        if found is number {
+            if s := to_f64(number) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not «number»" }
+        } else if found is text {
+            if s := to_f64(trim(text)) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not '«text»'" }
+        } else {
+            fail: bad_seconds = "«name» is a number of seconds"
+        }
+    }
 }
 
 task_names :: (-> string) {
@@ -370,7 +424,15 @@ run_task :: (out: *[..] u8, task: Task, arguments: Json) {
     // A program given as a path (build/rain.exe) is the project's.
     *program := task.command[0]
     if contains_any(program, "/\\") then program = in_project(program)
-    run_program(out, task.name, ⟨folder: config.folder, timeout: task.timeout⟩, program, command)
+    // Its timeout, or the call's.
+    *timeout := task.timeout
+    if seconds := seconds_member(arguments, "timeout", task.timeout) {
+        timeout = seconds
+    } else if bad_seconds {
+        tool_result(out, bad_seconds, true)
+        return
+    }
+    run_program(out, task.name, ⟨folder: config.folder, timeout: timeout⟩, program, command)
 }
 
 //- Changing the tasks
@@ -535,29 +597,60 @@ run_tool :: (out: *[..] u8, arguments: Json) {
         tool_result(out, "run needs a program", true)
         return
     }
+    if is_git(program) {
+        tool_result(out, "git goes through the git tool: it takes any of git's commands as operation (with arguments, message and folder), and saves the working tree first when one could lose work", true)
+        return
+    }
     *folder := text_member(arguments, "folder")
     if folder == "" { folder = config.folder } else { folder = in_project(folder) }
     *timeout := DEFAULT_TIMEOUT
-    if t := member(arguments, "timeout") is not absent {
-        if t is number { if seconds := to_f64(number) is not invalid { timeout = seconds } }
+    if seconds := seconds_member(arguments, "timeout", DEFAULT_TIMEOUT) {
+        timeout = seconds
+    } else if bad_seconds {
+        tool_result(out, bad_seconds, true)
+        return
     }
     run_program(out, "run", ⟨folder: folder, input: text_member(arguments, "input"), timeout: timeout⟩, program, texts_member(arguments, "arguments"))
 }
 
+// Is the program git (git, git.exe, or a path to one)?
+is_git :: (program: string -> bool) {
+    name := to_lower(file_name(program))
+    return name == "git" or name == "git.exe"
+}
+
 git_tool :: (out: *[..] u8, arguments: Json) {
-    command := text_member(arguments, "command")
-    *known := false
-    for c: GIT_COMMANDS { if c == command then known = true }
-    if !known {
-        tool_result(out, "git here runs status, diff, log, show, add or commit, not '«command»'", true)
+    *operation := text_member(arguments, "operation")
+    if operation == "" then operation = text_member(arguments, "command")     // (its name before 741)
+    if operation == "" {
+        tool_result(out, "git needs an operation: status, diff, log, show, add, commit, or any other of git's commands", true)
         return
+    }
+    *folder := text_member(arguments, "folder")
+    if folder == "" { folder = config.folder } else { folder = in_project(folder) }
+    extra := texts_member(arguments, "arguments")
+    // One that makes a loss permanent is run only when asked to be.
+    loss := permanent_loss(operation, extra)
+    if loss.count > 0 and !bool_member(arguments, "permanent") {
+        tool_result(out, "git «operation» «join(extra, " ")» «loss»: that can't be undone, so it's run only with \"permanent\": true", true)
+        return
+    }
+    // One that can lose uncommitted work: the working tree is saved first.
+    *saved := ""
+    if !only_looks(operation, extra) {
+        if commit := save_working_tree(folder, operation) {
+            saved = commit
+        } else if failed {
+            tool_result(out, "the working tree couldn't be saved first, so git «operation» wasn't run: «failed»", true)
+            return
+        }
     }
     *line: [..] string
     line.add("-c")
     line.add("core.quotepath=false")
-    line.add(command)
+    line.add(operation)
     *input := ""
-    if command == "commit" {
+    if operation == "commit" {
         message := text_member(arguments, "message")
         if message == "" {
             tool_result(out, "a commit needs its message, as message", true)
@@ -567,8 +660,107 @@ git_tool :: (out: *[..] u8, arguments: Json) {
         line.add("-")
         input = message
     }
-    for extra: texts_member(arguments, "arguments") { line.add(extra) }
-    run_program(out, "git", ⟨folder: config.folder, input: input, timeout: DEFAULT_TIMEOUT⟩, "git", line)
+    for piece: extra { line.add(piece) }
+    *note := ""
+    if saved.count > 0 {
+        note = "(the working tree was saved first, untracked files too, as commit «saved[:12]»: git restore --source=«saved[:12]» -- <path> brings a file back)\n"
+    }
+    run_program(out, "git", ⟨folder: folder, input: input, timeout: DEFAULT_TIMEOUT⟩, "git", line, note)
+}
+
+// Does a git command only look, or only add to what's kept?
+only_looks :: (operation: string, extra: [] string -> bool) {
+    if operation == "stash" then return extra.count > 0 and (extra[0] == "list" or extra[0] == "show")
+    if operation == "worktree" then return extra.count > 0 and extra[0] == "list"
+    if operation == "reflog" then return extra.count == 0 or extra[0] == "show" or extra[0] == "exists" or starts_with(extra[0], "-")
+    for name: split(LOOKING, " ") { if name == operation then return true }
+    return false
+}
+
+// What a git command does that can't be undone, or nothing: dropping the
+// reflog (how lost commits are found again), pruning what's unreachable
+// at once, or overwriting history on a remote.
+permanent_loss :: (operation: string, extra: [] string -> string) {
+    if operation == "reflog" and extra.count > 0 and (extra[0] == "expire" or extra[0] == "delete") then return "drops reflog entries, how lost commits are found again"
+    if operation == "prune" then return "deletes what no ref or reflog reaches"
+    if operation == "gc" {
+        for piece: extra {
+            if starts_with(piece, "--prune") and piece != "--prune=never" then return "deletes what no ref or reflog reaches"
+        }
+    }
+    if operation == "push" {
+        for piece: extra {
+            if piece == "-f" or starts_with(piece, "--force") or piece == "--mirror" or piece == "--delete" or piece == "-d" or starts_with(piece, "+") or starts_with(piece, ":") {
+                return "overwrites or deletes history on the remote"
+            }
+        }
+    }
+    return ""
+}
+
+// Saves the working tree as it is (what's changed, and untracked files the
+// .gitignore doesn't leave out) as a commit, refs/buckram/saved/<when>,
+// without touching it or the index: through a copy of the index. Gives the
+// commit, or "" when there's nothing uncommitted to save.
+save_working_tree :: (folder: string, operation: string -> commit: string) [failed: string] {
+    commit = ""
+    status := git_output(folder, "status", "--porcelain", "--untracked-files=all")
+    if status.failed then fail: failed = status.text
+    if trim(status.text).count == 0 then return
+    index := git_path(folder, "index")
+    if index.failed then fail: failed = index.text
+    copy := git_path(folder, "buckram-saved-index")
+    if copy.failed then fail: failed = copy.text
+    if file_exists(index.text) {
+        if copy_file(index.text, copy.text) is absent or os_error then fail: failed = "the index can't be copied to «copy.text»"
+    }
+    if set_environment("GIT_INDEX_FILE", copy.text) is os_error then fail: failed = "GIT_INDEX_FILE can't be set"
+    added := git_output(folder, "add", "-A")
+    tree := git_output(folder, "write-tree")
+    // (back to the real index, for the command itself)
+    if set_environment("GIT_INDEX_FILE", index.text) is os_error then fail: failed = "GIT_INDEX_FILE can't be set back"
+    if delete_file(copy.text) is absent or os_error { }
+    if added.failed then fail: failed = added.text
+    if tree.failed then fail: failed = tree.text
+    *made: Git_Output = ⟨⟩
+    message := "buckram: the working tree before git «operation»"
+    head := git_output(folder, "rev-parse", "--verify", "--quiet", "HEAD")
+    if head.failed or trim(head.text).count == 0 {
+        made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", trim(tree.text), "-m", message)
+    } else {
+        made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", trim(tree.text), "-p", trim(head.text), "-m", message)
+    }
+    if made.failed then fail: failed = made.text
+    commit = trim(made.text)
+    t := to_calendar(current_time_consensus(), .LOCAL)
+    when := "«t.year»«t.month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»«t.day_of_month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»-«t.hour, ⟨width: 2, pad: "0"⟩»«t.minute, ⟨width: 2, pad: "0"⟩»«t.second, ⟨width: 2, pad: "0"⟩»-«t.millisecond, ⟨width: 3, pad: "0"⟩»"
+    kept := git_output(folder, "update-ref", "refs/buckram/saved/«when»", commit)
+    if kept.failed then fail: failed = kept.text
+}
+
+// What a git command printed, and whether it failed (its text then saying
+// why).
+Git_Output :: struct {
+    text: string
+    failed: bool
+}
+
+git_output :: (folder: string, .. arguments: string -> result: Git_Output) {
+    result = ⟨⟩
+    if code, output, errors, timed_out := run_with(⟨folder: folder, timeout: 120⟩, "git", arguments..) {
+        result.text = output
+        if code != 0 or timed_out then result = ⟨"git «join(arguments, " ")»: «trim(errors)»", true⟩
+    } else if absent or os_error {
+        result = ⟨"git can't be run", true⟩
+    }
+}
+
+// A path in the repository's git folder (its index, say), whole.
+git_path :: (folder: string, name: string -> result: Git_Output) {
+    result = git_output(folder, "rev-parse", "--git-path", name)
+    if result.failed then return
+    path := trim(result.text)
+    if path.count >= 2 and path[1] == ":" { result.text = path } else { result.text = join_path(folder, path) }
 }
 
 // A path the agent gives: the project's, unless it's whole already.
@@ -659,11 +851,13 @@ edit_tool :: (out: *[..] u8, arguments: Json) {
     tool_result(out, "«edits.count» edit«plural(edits.count)» made, in «files.count» file«plural(files.count)»", false)
 }
 
-// Runs it, and gives back what happened as the tool's result.
-run_program :: (out: *[..] u8, tool_name: string, options: Run_Options, program: string, arguments: [] string) {
+// Runs it, and gives back what happened as the tool's result (after the
+// note, if there is one).
+run_program :: (out: *[..] u8, tool_name: string, options: Run_Options, program: string, arguments: [] string, note: string = "") {
     if code, output, errors, timed_out := run_with(options, program, arguments..) {
         *text: [..] u8
-        if timed_out { append(text, "timed out after «options.timeout» seconds, so it was ended\n") }
+        append(text, note)
+        if timed_out { append(text, "timed out after «seconds_text(options.timeout)» seconds, so it was ended, with what it started\n") }
         else { append(text, "exit code «code»\n") }
         append(text, output)
         if errors.count > 0 {

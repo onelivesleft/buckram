@@ -19,11 +19,23 @@ is downloaded: nothing needs building first.
 
 - **run**: a program (a path, or a name on the PATH), its arguments as a
   list, and if wanted the folder it starts in, its standard input and a
-  timeout (600 seconds by default).
-- **git**: `status`, `diff`, `log`, `show`, `add` and `commit`, with more
-  arguments as a list. A commit's message is given as `message`, and goes
-  to git as its input (`git commit -F -`), never on a command line. Nothing
-  that rewrites or discards history or work is offered.
+  timeout (600 seconds by default). A timeout ends what the program started
+  too (on Windows, it runs in a job object of its own). git isn't run here,
+  but by the git tool.
+- **git**: any of git's commands (`operation`), with more arguments as a
+  list, in the project or in `folder`. A commit's message is given as
+  `message`, and goes to git as its input (`git commit -F -`), never on a
+  command line. Before a command that can lose uncommitted work
+  (`checkout`, `reset`, `restore`, `stash`, `clean`, `rebase`, ...: any but
+  those that only look or only add, such as `status`, `log`, `add`,
+  `commit`, `fetch`), the working tree is saved as a commit, untracked
+  files too (not ignored ones), through a copy of the index, so neither the
+  working tree nor the index changes. It's kept as
+  `refs/buckram/saved/<when>`, and the result begins with it: `git restore
+  --source=<commit> -- <path>` brings a file back. A command that makes a
+  loss permanent (`reflog expire` or `delete`, `gc --prune`, `prune`, a
+  forced push, a deleted remote branch) runs only with `"permanent":
+  true`, which an agent is told needs the person's say-so.
 - **edit**: exact replacements in files, all or none. Each edit's old text
   must be in its file exactly `count` times (1 by default); if any isn't,
   nothing is written. An empty old text makes a new file.
@@ -47,6 +59,9 @@ when, the tool and its arguments, how long it took, whether it was an
 error, and how big its result was. It shows which jobs an agent does often
 enough to be a task, or a tool of buckram's own.
 
+A tool refuses a parameter it doesn't have, naming those it has, rather
+than dropping it without a word.
+
 Each gives back the exit code, then the output and errors. Past
 `output_limit` bytes (8192 by default) the middle is cut, at a character's
 start, and the whole of it is kept in `output_folder/<tool>.txt`. A tool
@@ -60,8 +75,8 @@ an error result.
   "output_limit": 8192,
   "output_folder": "build/buckram",
   "tasks": {
-    "build": { "description": "Builds it.", "run": ["python", "tools/dev.py", "build"] },
-    "test":  { "description": "Runs the tests.", "run": ["python", "tools/dev.py", "test"],
+    "build": { "description": "Builds it.", "run": ["tools/build.exe"] },
+    "test":  { "description": "Runs the tests.", "run": ["build/tests.exe"],
                "arguments": "list", "timeout": 900 }
   }
 }
@@ -70,8 +85,9 @@ an error result.
 A task's `run` is the program and its arguments; a program given as a
 path is the project's. Its `arguments` is `"none"` (the default) or
 `"list"`, for a tool that takes a list of strings to add after them. Its
-`timeout` is in seconds. A task can't have the name of one of buckram's
-own tools.
+`timeout` is in seconds (600 by default), and a call can give its own (a
+number, or a string of one). A task can't have the name of one of
+buckram's own tools.
 
 Run real programs where you can: a `.bat` file goes through `cmd.exe`,
 which parses its command line again.
