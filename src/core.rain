@@ -55,8 +55,9 @@
 // (600 by default), and a call can give its own. A timeout ends what the
 // program started too.
 //
-// Every tool refuses a parameter it hasn't (naming those it has), rather
-// than dropping it without a word.
+// Every tool refuses a parameter it hasn't (naming those it has), or one
+// of the wrong type (saying what to give), rather than dropping it or
+// reading it as empty.
 
 #import "Console"
 #import "String"
@@ -338,15 +339,15 @@ record_call :: (name: string, arguments: Json, took: Apollo_Time, result: string
 call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
     // Each tool's parameters: one it hasn't is refused, rather than
     // dropped without a word.
-    if name == "run" { if takes_only(out, name, arguments, "program arguments folder input timeout") then run_tool(out, arguments); return }
-    if name == "git" { if takes_only(out, name, arguments, "operation command arguments message folder permanent") then git_tool(out, arguments); return }
-    if name == "edit" { if takes_only(out, name, arguments, "edits") then edit_tool(out, arguments); return }
-    if name == "files" { if takes_only(out, name, arguments, "operation path all from to paths") then files_tool(out, arguments); return }
-    if name == "processes" { if takes_only(out, name, arguments, "operation name ids") then processes_tool(out, arguments); return }
-    if name == "add_task" { if takes_only(out, name, arguments, "name description run arguments timeout") then add_task_tool(out, arguments); return }
-    if name == "remove_task" { if takes_only(out, name, arguments, "name") then remove_task_tool(out, arguments); return }
+    if name == "run" { if takes_only(out, name, arguments, "program:text arguments:texts folder:text input:text timeout:seconds") then run_tool(out, arguments); return }
+    if name == "git" { if takes_only(out, name, arguments, "operation:text command:text arguments:texts message:text folder:text permanent:bool") then git_tool(out, arguments); return }
+    if name == "edit" { if takes_only(out, name, arguments, "edits:list") then edit_tool(out, arguments); return }
+    if name == "files" { if takes_only(out, name, arguments, "operation:text path:text all:bool from:text to:text paths:texts") then files_tool(out, arguments); return }
+    if name == "processes" { if takes_only(out, name, arguments, "operation:text name:text ids:integers") then processes_tool(out, arguments); return }
+    if name == "add_task" { if takes_only(out, name, arguments, "name:text description:text run:texts arguments:text timeout:seconds") then add_task_tool(out, arguments); return }
+    if name == "remove_task" { if takes_only(out, name, arguments, "name:text") then remove_task_tool(out, arguments); return }
     if name == "task" {
-        if !takes_only(out, name, arguments, "name arguments timeout") then return
+        if !takes_only(out, name, arguments, "name:text arguments:texts timeout:seconds") then return
         wanted := text_member(arguments, "name")
         for task: config.tasks {
             if task.name == wanted {
@@ -359,8 +360,8 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
     }
     for task: config.tasks {
         if task.name == name {
-            *parameters := "timeout"
-            if task.takes == .LIST then parameters = "arguments timeout"
+            *parameters := "timeout:seconds"
+            if task.takes == .LIST then parameters = "arguments:texts timeout:seconds"
             if takes_only(out, name, arguments, parameters) then run_task(out, task, arguments)
             return
         }
@@ -368,20 +369,108 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
     tool_result(out, "there's no tool '«name»'", true)
 }
 
-// Does the call give only parameters the tool has (names, separated by
-// spaces)? If not, its error is the result.
-takes_only :: (out: *[..] u8, tool_name: string, arguments: Json, names: string -> bool) {
+// Does the call give only parameters the tool has, each of its type? Its
+// parameters are name:type, separated by spaces, a type one of text, texts
+// (a list of text), bool, seconds (a number, or text of one), integers (a
+// list of whole numbers) and list. A null is a parameter not given. If one
+// isn't right, its error is the result.
+takes_only :: (out: *[..] u8, tool_name: string, arguments: Json, parameters: string -> bool) {
+    *names: [..] u8
+    for parameter, i: split(parameters, " ") {
+        if i > 0 then append(names, ", ")
+        append(names, before_colon(parameter))
+    }
     if arguments is object {
-        for given: object.names {
-            *known := false
-            for name: split(names, " ") { if name == given then known = true }
-            if !known {
-                tool_result(out, "«tool_name» has no parameter '«given»' (its parameters: «replace(names, " ", ", ")»)", true)
+        for given, k: object.names {
+            *type := ""
+            for parameter: split(parameters, " ") { if before_colon(parameter) == given then type = after_colon(parameter) }
+            if type == "" {
+                tool_result(out, "«tool_name» has no parameter '«given»' (its parameters: «string'names»)", true)
+                return false
+            }
+            why := wrong_type(object.values[k], type)
+            if why != "" {
+                tool_result(out, "«possessive(tool_name)» «given» «why»", true)
                 return false
             }
         }
     }
     return true
+}
+
+before_colon :: (parameter: string -> string) {
+    if at := first_index(parameter, ":") { return parameter[:at] } else if absent { return parameter }
+}
+
+after_colon :: (parameter: string -> string) {
+    if at := first_index(parameter, ":") { return parameter[at + 1:] } else if absent { return "" }
+}
+
+// What's wrong with a parameter's value for its type ("is text, not the
+// number 5"), or "".
+wrong_type :: (value: Json, type: string -> string) {
+    if value is none then return ""
+    if type == "text" {
+        if value is text then return ""
+        if value is number then return #"is text, not «described(value)»: give it in quotes, "«number»""#
+        return "is text, not «described(value)»"
+    }
+    if type == "bool" {
+        if value is boolean then return ""
+        return "is true or false, not «described(value)»"
+    }
+    if type == "seconds" {
+        if value is number then return ""
+        if value is text then return ""          // (read as a number when it's used)
+        return "is a number of seconds, not «described(value)»"
+    }
+    if type == "list" {
+        if value is list then return ""
+        if value is object then return "is a list, not an object: put it in one, [{...}]"
+        return "is a list, not «described(value)»"
+    }
+    if type == "texts" {
+        if value is list {
+            for item, i: list {
+                if item is text { continue }
+                if item is number then return #"is a list of text, and its item «i + 1» is «described(item)»: give it in quotes, "«number»""#
+                return "is a list of text, and its item «i + 1» is «described(item)»"
+            }
+            return ""
+        }
+        if value is text then return #"is a list of text, not «described(value)»: give it as a list, ["«text»"]"#
+        return "is a list of text, not «described(value)»"
+    }
+    if type == "integers" {
+        if value is list {
+            for item, i: list {
+                *whole := false
+                if item is number {
+                    if n := to_i64(number) is not invalid or too_big { whole = true }
+                }
+                if !whole then return "is a list of whole numbers, and its item «i + 1» is «described(item)»"
+            }
+            return ""
+        }
+        return "is a list of whole numbers, not «described(value)»"
+    }
+    return ""
+}
+
+// edit's, or processes'.
+possessive :: (name: string -> string) {
+    if ends_with(name, "s") then return "«name»'"
+    return "«name»'s"
+}
+
+// A JSON value in words: the number 5, the text "x", true, a list.
+described :: (value: Json -> string) {
+    if value is none then return "null"
+    if value is boolean { if boolean then return "true" else return "false" }
+    if value is number then return "the number «number»"
+    if value is text then return #"the text "«text»""#
+    if value is list then return "a list"
+    return "an object"
 }
 
 // Seconds as text: 600, or 0.5.
@@ -396,7 +485,9 @@ seconds_text :: (seconds: f64 -> string) {
 seconds_member :: (value: Json, name: string, fallback: f64 -> seconds: f64) [bad_seconds: string] {
     seconds = fallback
     if found := member(value, name) is not absent {
-        if found is number {
+        if found is none {
+            // not given
+        } else if found is number {
             if s := to_f64(number) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not «number»" }
         } else if found is text {
             if s := to_f64(trim(text)) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not '«text»'" }

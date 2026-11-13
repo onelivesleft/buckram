@@ -36,8 +36,9 @@ do; in short:
   (`reflog expire`/`delete`, `gc --prune`, `prune`, a forced push or a
   deleted remote branch) runs only with `"permanent": true`: ask the
   person first, every time.
-- **A parameter a tool hasn't** is refused, with the ones it has: read
-  the error, don't drop the parameter blindly.
+- **A parameter a tool hasn't** is refused, with the ones it has, and so
+  is one of the wrong type (`"arguments": ["-n", 10]`: give `"10"`); the
+  error says what to give. A `null` is a parameter not given.
 - **`files`** to list, copy, move or delete files and folders, rather than
   a program written for it: `operation` `list` (`path`, `all`), `copy` or
   `move` (`from`, `to`: a file or a whole folder), `delete` (`paths`; a

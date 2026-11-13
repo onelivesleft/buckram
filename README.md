@@ -60,9 +60,11 @@ when, the tool and its arguments, how long it took, whether it was an
 error, and how big its result was. It shows which jobs an agent does often
 enough to be a task, or a tool of buckram's own.
 
-A tool refuses a parameter it doesn't have, naming those it has, rather
-than dropping it without a word; and `edit` refuses an edit with a field
-it doesn't have, or without `file`, `old` or `new`.
+A tool refuses a parameter it doesn't have, naming those it has, and one
+of the wrong type (a number in `arguments`, `"true"` for `permanent`, a
+number for `folder`), saying what to give, rather than dropping it or
+reading it as empty; a `null` is a parameter not given. `edit` refuses an
+edit with a field it doesn't have, or without `file`, `old` or `new`.
 
 Each gives back the exit code, then the output and errors. Past
 `output_limit` bytes (8192 by default) the middle is cut, at a character's
