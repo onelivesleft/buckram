@@ -135,6 +135,9 @@ folder as its argument:
 
 On Linux the command is `bin/buckram` (`"command":
 "/home/you/buckram/bin/buckram"`), which runs `bin/buckram_core` beside it.
+It runs from a copy of itself in the machine's memory (`$XDG_RUNTIME_DIR`,
+or `/tmp`), since `bin/` may be a shared folder that a build on Windows
+replaces it in, and a running program whose file is replaced there dies.
 Its tools are the same; a task's programs are Linux's (`sh`, `make`, a
 project's own), and a project that's used on both keeps a `buckram.json`
 each machine writes for itself.

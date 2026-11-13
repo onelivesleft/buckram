@@ -154,7 +154,9 @@ A tool's result is an error when its program exits with a code other than
   and so is a changed `buckram.json`, and the stub tells the client its
   tools may have changed. A change to the stub (`src/stub.rain`: its
   instructions, `initialize`, how it starts the core) needs the client to
-  restart, as the running stub is the old one until then.
+  restart, as the running stub is the old one until then. On Linux the
+  stub runs from a copy of itself (in `$XDG_RUNTIME_DIR`), so a build that
+  replaces `bin/buckram` through a VM's shared folder doesn't end it.
 - **Testing:** feed a session to it, a JSON-RPC message a line, and read
   what it writes back:
   ```

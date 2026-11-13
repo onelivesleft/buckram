@@ -18,6 +18,12 @@
 //
 // It writes only protocol messages to its standard output, a message a
 // line; what it has to say otherwise goes to standard error.
+//
+// On Linux it runs from a copy of itself in this machine's own memory
+// ($XDG_RUNTIME_DIR, or /tmp), deleted once it's running. bin/buckram may
+// be on a shared folder (a VM's, from Windows) that serves a file by its
+// path: when a build replaces it there, a stub running from it reads its
+// next pages from the new file, and dies.
 
 #import "Console"
 #import "String"
@@ -26,13 +32,14 @@
 #import "Json"
 #import "Time"
 
-VERSION :: "0.3.0"
+VERSION :: "0.3.1"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
-INSTRUCTIONS :: "buckram runs programs for you with their arguments as a list, so nothing is quoted, escaped or expanded on the way: a backslash, a $, a % or a quote arrives as you wrote it. Use it instead of a shell. The project's tasks (build, test and the like, from its buckram.json) are tools of their own: prefer one to run when there is one. When you'll run a command more than once or twice and there's no task for it, add one with add_task: it's a tool of its own from your next call (task runs it by name meanwhile), and it's kept in buckram.json for whoever works here next. Use run for a one-off. Use git, not run, for any of git's commands (give a commit's message as message, as it is: it never goes on a command line): before one that can lose uncommitted work, it saves the working tree as a commit, and one that makes a loss permanent (reflog expire, gc --prune, a forced push) runs only with permanent: true, which needs the user's say-so. Every tool refuses a parameter it doesn't have, and names the ones it does. Use edit for several exact replacements that must all happen or none, across one file or many. Each tool gives the exit code, then the output and errors; a program that exits with another code than 0, or runs past its timeout, is an error result. Long output is cut in the middle, and the note where it's cut gives the file that has all of it: read that file for the rest rather than running the program again."
+INSTRUCTIONS :: "buckram runs programs for you with their arguments as a list, so nothing is quoted, escaped or expanded on the way: a backslash, a $, a % or a quote arrives as you wrote it. Use it instead of a shell. The project's tasks (build, test and the like, from its buckram.json) are tools of their own: prefer one to run when there is one. When you'll run a command more than once or twice and there's no task for it, add one with add_task: it's a tool of its own from your next call (task runs it by name meanwhile), and it's kept in buckram.json for whoever works here next. Use run for a one-off. Use git, not run, for any of git's commands (give a commit's message as message, as it is: it never goes on a command line): before one that can lose uncommitted work, it saves the working tree as a commit, and one that makes a loss permanent (reflog expire, gc --prune, a forced push) runs only with permanent: true, which needs the user's say-so. Every tool refuses a parameter it doesn't have, or one of the wrong type, and says what it takes. Use edit for several exact replacements that must all happen or none, across one file or many. Each tool gives the exit code, then the output and errors; a program that exits with another code than 0, or runs past its timeout, is an error result. Long output is cut in the middle, and the note where it's cut gives the file that has all of it: read that file for the rest rather than running the program again."
 #if #OS == .WINDOWS {
     CORE :: "buckram_core.exe"
 } #else {
     CORE :: "buckram_core"
+    Linux :: #import "OS_Linux"
 }
 
 // What's watched for a change: a file's size and when it was written.
@@ -53,8 +60,22 @@ main :: (args: [] string) {
     // folder changes).
     *own := args[0]
     if whole := full_path(own) is not os_error { own = whole }
+    *home := folder_of(own)
+    #if #OS == .LINUX {
+        // The copy finds the core where the stub was started.
+        if given := environment("BUCKRAM_HOME") is not absent or os_error {
+            if given != "" {
+                home = given
+                forget_copy()
+            } else {
+                run_from_copy(args)
+            }
+        } else {
+            run_from_copy(args)
+        }
+    }
     own_path = own
-    core = join_path(folder_of(own), CORE)
+    core = join_path(home, CORE)
     if args.count > 1 {
         if set_current_folder(args[1]) {
         } else if absent {
@@ -81,6 +102,45 @@ main :: (args: [] string) {
 
 log :: (text: string) {
     echo(.ERROR, "buckram: «text»")
+}
+
+#if #OS == .LINUX {
+    // Copies this program into this machine's memory and runs the copy in
+    // its place, with BUCKRAM_HOME saying where the core is; if any of it
+    // fails, it runs on as it is.
+    run_from_copy :: (args: [] string) {
+        *original := ""
+        if path := Linux.executable_path() { original = path } else if os_error { return }
+        *folder := "/tmp"
+        if runtime := environment("XDG_RUNTIME_DIR") is not absent or os_error {
+            if folder_exists(runtime) then folder = runtime
+        }
+        copy := join_path(folder, "buckram-«Linux.current_process_id()»")
+        if copy_file(original, copy) is absent or os_error then return
+        if set_environment("BUCKRAM_HOME", folder_of(original)) is os_error then return
+        if set_environment("BUCKRAM_COPY", copy) is os_error then return
+        *arguments: [..] string
+        arguments.add(copy)
+        for argument: args[1:] { arguments.add(argument) }
+        error := Linux.exec(copy, arguments, Linux.environment_entries())
+        // (exec gives back only when it couldn't run it)
+        log("it runs from its own file, as its copy couldn't be run («error»)")
+        if delete_file(copy) is absent or os_error { }
+        if set_environment("BUCKRAM_HOME", "") is os_error { }
+        if set_environment("BUCKRAM_COPY", "") is os_error { }
+    }
+
+    // In the copy: its file deleted (it runs on from memory), and the two
+    // variables emptied, so a buckram that a tool starts makes its own.
+    forget_copy :: () {
+        if copy := environment("BUCKRAM_COPY") is not absent or os_error {
+            if copy != "" {
+                if delete_file(copy) is absent or os_error { }
+            }
+        }
+        if set_environment("BUCKRAM_HOME", "") is os_error { }
+        if set_environment("BUCKRAM_COPY", "") is os_error { }
+    }
 }
 
 seen :: (path: string -> Seen) {
