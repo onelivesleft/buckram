@@ -25,12 +25,12 @@
 // path: when a build replaces it there, a stub running from it reads its
 // next pages from the new file, and dies.
 
-#import "Console"
-#import "String"
-#import "File"
-#import "System"
-#import "Json"
-#import "Time"
+#import Console
+#import String
+#import File
+#import System
+#import Json
+#import Time
 
 VERSION :: "0.3.1"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
@@ -39,14 +39,14 @@ INSTRUCTIONS :: "buckram runs programs for you with their arguments as a list, s
     CORE :: "buckram_core.exe"
 } #else {
     CORE :: "buckram_core"
-    Linux :: #import "OS_Linux"
+    Linux :: #import OS_Linux
 }
 
 // What's watched for a change: a file's size and when it was written.
 Seen :: struct {
     there: bool
     size: u64
-    modified: Apollo_Time
+    modified: Time.Apollo_Time
 }
 
 own_path: string                     // this program's
@@ -59,11 +59,11 @@ main :: (args: [] string) {
     // The core is beside this program (its path made whole before the
     // folder changes).
     *own := args[0]
-    if whole := full_path(own) is not os_error { own = whole }
-    *home := folder_of(own)
+    if whole := File.full_path(own) is not os_error { own = whole }
+    *home := File.folder_of(own)
     #if #OS == .LINUX {
         // The copy finds the core where the stub was started.
-        if given := environment("BUCKRAM_HOME") is not absent or os_error {
+        if given := System.environment("BUCKRAM_HOME") is not absent or os_error {
             if given != "" {
                 home = given
                 forget_copy()
@@ -75,16 +75,18 @@ main :: (args: [] string) {
         }
     }
     own_path = own
-    core = join_path(home, CORE)
+    core = File.join_path(home, CORE)
     if args.count > 1 {
-        if set_current_folder(args[1]) {
+        if System.set_current_folder(args[1]) {
         } else if absent {
-            log("there's no folder «args[1]», so it works in «current_folder()»")
+            here := `scratch System.current_folder()
+            log("there's no folder «args[1]», so it works in «here»")
         } else if os_error {
-            log("it can't work in «args[1]» («os_error»), so it works in «current_folder()»")
+            here := `scratch System.current_folder()
+            log("it can't work in «args[1]» («os_error»), so it works in «here»")
         }
     }
-    config = join_path(current_folder(), "buckram.json")
+    config = File.join_path(System.current_folder(), "buckram.json")
     seen_core = seen(core)
     seen_config = seen(config)
     loop {
@@ -109,42 +111,45 @@ log :: (text: string) {
     // its place, with BUCKRAM_HOME saying where the core is; if any of it
     // fails, it runs on as it is.
     run_from_copy :: (args: [] string) {
-        *original := ""
-        if path := Linux.executable_path() { original = path } else if os_error { return }
-        *folder := "/tmp"
-        if runtime := environment("XDG_RUNTIME_DIR") is not absent or os_error {
-            if folder_exists(runtime) then folder = runtime
+        scratch.rewind_at_end()
+        `scratch {
+            *original := ""
+            if path := Linux.executable_path() { original = path } else if os_error { return }
+            *folder := "/tmp"
+            if runtime := System.environment("XDG_RUNTIME_DIR") is not absent or os_error {
+                if File.folder_exists(runtime) then folder = runtime
+            }
+            copy := File.join_path(folder, "buckram-«Linux.current_process_id()»")
+            if File.copy_file(original, copy) is absent or os_error then return
+            if System.set_environment("BUCKRAM_HOME", File.folder_of(original)) is os_error then return
+            if System.set_environment("BUCKRAM_COPY", copy) is os_error then return
+            *arguments: [..] string
+            arguments.add(copy)
+            for argument: args[1:] { arguments.add(argument) }
+            error := Linux.exec(copy, arguments, Linux.environment_entries())
+            // (exec gives back only when it couldn't run it)
+            log("it runs from its own file, as its copy couldn't be run («error»)")
+            if File.delete_file(copy) is absent or os_error { }
+            if System.set_environment("BUCKRAM_HOME", "") is os_error { }
+            if System.set_environment("BUCKRAM_COPY", "") is os_error { }
         }
-        copy := join_path(folder, "buckram-«Linux.current_process_id()»")
-        if copy_file(original, copy) is absent or os_error then return
-        if set_environment("BUCKRAM_HOME", folder_of(original)) is os_error then return
-        if set_environment("BUCKRAM_COPY", copy) is os_error then return
-        *arguments: [..] string
-        arguments.add(copy)
-        for argument: args[1:] { arguments.add(argument) }
-        error := Linux.exec(copy, arguments, Linux.environment_entries())
-        // (exec gives back only when it couldn't run it)
-        log("it runs from its own file, as its copy couldn't be run («error»)")
-        if delete_file(copy) is absent or os_error { }
-        if set_environment("BUCKRAM_HOME", "") is os_error { }
-        if set_environment("BUCKRAM_COPY", "") is os_error { }
     }
 
     // In the copy: its file deleted (it runs on from memory), and the two
     // variables emptied, so a buckram that a tool starts makes its own.
     forget_copy :: () {
-        if copy := environment("BUCKRAM_COPY") is not absent or os_error {
+        if copy := System.environment("BUCKRAM_COPY") is not absent or os_error {
             if copy != "" {
-                if delete_file(copy) is absent or os_error { }
+                if File.delete_file(copy) is absent or os_error { }
             }
         }
-        if set_environment("BUCKRAM_HOME", "") is os_error { }
-        if set_environment("BUCKRAM_COPY", "") is os_error { }
+        if System.set_environment("BUCKRAM_HOME", "") is os_error { }
+        if System.set_environment("BUCKRAM_COPY", "") is os_error { }
     }
 }
 
 seen :: (path: string -> Seen) {
-    if entry := file_info(path) {
+    if entry := File.file_info(path) {
         return ⟨true, entry.size, entry.modified⟩
     } else if absent or os_error {
         return ⟨⟩
@@ -162,77 +167,86 @@ changed :: (-> bool) {
 }
 
 handle :: (line: string) {
-    if trim(line).count == 0 then return
-    *method := ""
-    *id: Json
-    *has_id := false
-    *params: Json
-    if request := parse_json(line) {
-        if m := member(request, "method") is not absent {
-            if m is text { method = text }
+    scratch.rewind_at_end()
+    `scratch {
+        if String.trim(line).count == 0 then return
+        *method := ""
+        *id: Json.Json_Value
+        *has_id := false
+        *params: Json.Json_Value
+        if request := Json.parse_json(line) {
+            if m := Json.member(request, "method") is not absent {
+                if m is text { method = text }
+            }
+            if given := Json.member(request, "id") is not absent {
+                id = given
+                has_id = true
+            }
+            if p := Json.member(request, "params") is not absent { params = p }
+        } else if bad_json {
+            respond_error(Json.Json_Value.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
+            return
         }
-        if given := member(request, "id") is not absent {
-            id = given
-            has_id = true
+        if method == "initialize" {
+            initialize(id, params)
+            return
         }
-        if p := member(request, "params") is not absent { params = p }
-    } else if bad_json {
-        respond_error(Json.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
-        return
-    }
-    if method == "initialize" {
-        initialize(id, params)
-        return
-    }
-    if !has_id {
-        // A notification: nothing to answer. Once a session has started,
-        // its client is told the tools may differ from a list it kept.
-        if method == "notifications/initialized" then tools_changed()
-        return
-    }
-    // Anything else is the core's.
-    if code, output, errors, timed_out := run_with(⟨input: line⟩, core) {
-        if errors.count > 0 then write(.ERROR, errors)
-        answer := trim(output)
-        if answer.count > 0 {
-            echo(answer)
-        } else {
-            respond_error(id, -32603, "buckram's core gave no answer (it exited with «code»)")
+        if !has_id {
+            // A notification: nothing to answer. Once a session has started,
+            // its client is told the tools may differ from a list it kept.
+            if method == "notifications/initialized" then tools_changed()
+            return
         }
-    } else if absent {
-        respond_error(id, -32603, "buckram's core isn't there: «core» (build it beside this, «file_name(own_path)»)")
-    } else if os_error {
-        respond_error(id, -32603, "buckram's core couldn't be started: «os_error»")
+        // Anything else is the core's.
+        if code, output, errors, timed_out := System.run_with(⟨input: line⟩, core) {
+            if errors.count > 0 then write(.ERROR, errors)
+            answer := String.trim(output)
+            if answer.count > 0 {
+                echo(answer)
+            } else {
+                respond_error(id, -32603, "buckram's core gave no answer (it exited with «code»)")
+            }
+        } else if absent {
+            respond_error(id, -32603, "buckram's core isn't there: «core» (build it beside this, «File.file_name(own_path)»)")
+        } else if os_error {
+            respond_error(id, -32603, "buckram's core couldn't be started: «os_error»")
+        }
+        if changed() then tools_changed()
     }
-    if changed() then tools_changed()
 }
 
 tools_changed :: () {
     echo(#"{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"#)
 }
 
-initialize :: (id: Json, params: Json) {
-    *version := PROTOCOL
-    if given := member(params, "protocolVersion") is not absent {
-        if given is text { version = text }
+initialize :: (id: Json.Json_Value, params: Json.Json_Value) {
+    scratch.rewind_at_end()
+    `scratch {
+        *version := PROTOCOL
+        if given := Json.member(params, "protocolVersion") is not absent {
+            if given is text { version = text }
+        }
+        *out: [..] u8
+        append(out, #"{"jsonrpc":"2.0","id":"#)
+        Json.write_json(out, id)
+        append(out, #","result":{"protocolVersion":"#)
+        Json.write_json_text(out, version)
+        append(out, #","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"buckram","version":"«VERSION»"},"instructions":"#)
+        Json.write_json_text(out, INSTRUCTIONS)
+        append(out, "}}")
+        echo(string'out)
     }
-    *out: [..] u8
-    append(out, #"{"jsonrpc":"2.0","id":"#)
-    write_json(out, id)
-    append(out, #","result":{"protocolVersion":"#)
-    write_json_text(out, version)
-    append(out, #","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"buckram","version":"«VERSION»"},"instructions":"#)
-    write_json_text(out, INSTRUCTIONS)
-    append(out, "}}")
-    echo(string'out)
 }
 
-respond_error :: (id: Json, code: i64, message: string) {
-    *out: [..] u8
-    append(out, #"{"jsonrpc":"2.0","id":"#)
-    write_json(out, id)
-    append(out, #","error":{"code":«code»,"message":"#)
-    write_json_text(out, message)
-    append(out, "}}")
-    echo(string'out)
+respond_error :: (id: Json.Json_Value, code: i64, message: string) {
+    scratch.rewind_at_end()
+    `scratch {
+        *out: [..] u8
+        append(out, #"{"jsonrpc":"2.0","id":"#)
+        Json.write_json(out, id)
+        append(out, #","error":{"code":«code»,"message":"#)
+        Json.write_json_text(out, message)
+        append(out, "}}")
+        echo(string'out)
+    }
 }

@@ -65,14 +65,14 @@
 // of the wrong type (saying what to give), rather than dropping it or
 // reading it as empty.
 
-#import "Console"
-#import "String"
-#import "File"
-#import "System"
-#import "Json"
-#import "Time"
+#import Console
+#import String
+#import File
+#import System
+#import Json
+#import Time
 
-#load "files.rain"
+#include "files.rain"
 
 VERSION :: "0.2.0"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
@@ -139,27 +139,35 @@ log :: (text: string) {
 
 load_config :: (-> loaded: Config) {
     loaded = ⟨⟩
-    loaded.folder = current_folder()
+    loaded.folder = System.current_folder()
     loaded.output_limit = 8192
     loaded.output_folder = "build/buckram"
     loaded.machine = machine_name()
     *tasks: [..] Task
     *elsewhere: [..] Elsewhere
-    if contents := read_file(join_path(loaded.folder, CONFIG_FILE)) is {
-        case absent:
-        case os_error:
-            log("buckram.json can't be read («os_error»)")
-    } else {
-        if value := parse_json(contents) {
-            if limit := member(value, "output_limit") is not absent {
+    *contents := ""                              // (in scratch: what's parsed from it is copied)
+    *read := false
+    `scratch {
+        if found := File.read_file(File.join_path(loaded.folder, CONFIG_FILE)) is {
+            case absent:
+            case os_error:
+                log("buckram.json can't be read («os_error»)")
+        } else {
+            contents = found
+            read = true
+        }
+    }
+    if read {
+        if value := Json.parse_json(contents) {
+            if limit := Json.member(value, "output_limit") is not absent {
                 if limit is number {
-                    if n := to_i64(number) { if n > 64 then loaded.output_limit = n } else if invalid or too_big { log("output_limit isn't a whole number") }
+                    if n := String.to_i64(number) { if n > 64 then loaded.output_limit = n } else if invalid or too_big { log("output_limit isn't a whole number") }
                 }
             }
-            if folder := member(value, "output_folder") is not absent {
+            if folder := Json.member(value, "output_folder") is not absent {
                 if folder is text { loaded.output_folder = text }
             }
-            if declared := member(value, "tasks") is not absent {
+            if declared := Json.member(value, "tasks") is not absent {
                 if declared is object {
                     for name, i: object.names {
                         if is_own_tool(name) {
@@ -188,13 +196,13 @@ load_config :: (-> loaded: Config) {
 // every system (a list), or one for each (an object of "windows" and
 // "linux" lists). One with commands only for others fails with only_for,
 // which they are.
-read_task :: (name: string, value: Json -> task: Task) [bad_task: string, only_for: string] {
+read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: string, only_for: string] {
     task = ⟨⟩
     task.name = name
     task.timeout = DEFAULT_TIMEOUT
     task.description = text_member(value, "description")
     *command: [..] string
-    if run := member(value, "run") is not absent {
+    if run := Json.member(value, "run") is not absent {
         if run is list {
             if !strings_of(list, command) then fail: bad_task = "its run is a list of strings, the program first"
         } else if run is object {
@@ -225,15 +233,15 @@ read_task :: (name: string, value: Json -> task: Task) [bad_task: string, only_f
     takes := text_member(value, "arguments")
     if takes == "list" { task.takes = .LIST }
     else if takes != "" and takes != "none" { fail: bad_task = #"its arguments is "none" or "list""# }
-    if timeout := member(value, "timeout") is not absent {
+    if timeout := Json.member(value, "timeout") is not absent {
         if timeout is number {
-            if t := to_f64(number) is not invalid { task.timeout = t }
+            if t := String.to_f64(number) is not invalid { task.timeout = t }
         }
     }
 }
 
 // The items, if they're all strings, added to the list.
-strings_of :: (items: [] Json, into: *[..] string -> bool) {
+strings_of :: (items: [] Json.Json_Value, into: *[..] string -> bool) {
     for item: items {
         if item is text { into.add(text) } else { return false }
     }
@@ -245,13 +253,15 @@ strings_of :: (items: [] Json, into: *[..] string -> bool) {
 // shared folder, or WSL, which shares Windows' name).
 machine_name :: (-> string) {
     *host := ""
-    #if #OS == .WINDOWS {
-        if name := environment("COMPUTERNAME") { host = name } else if absent or os_error { }
-    } #else {
-        if name := read_file("/proc/sys/kernel/hostname") { host = trim(name) } else if absent or os_error { }
+    `scratch {
+        #if #OS == .WINDOWS {
+            if name := System.environment("COMPUTERNAME") { host = name } else if absent or os_error { }
+        } #else {
+            if name := File.read_file("/proc/sys/kernel/hostname") { host = String.trim(name) } else if absent or os_error { }
+        }
     }
     *out: [..] u8
-    for c: to_lower(host) {
+    for c: `scratch String.to_lower(host) {
         if (c >= "a" and c <= "z") or (c >= "0" and c <= "9") or c == "-" or c == "_" { out.add(c) } else { out.add("_") }
     }
     if out.count == 0 then append(out, "unknown")
@@ -280,8 +290,8 @@ no_task :: (name: string -> string) {
 }
 
 // A member that's a string, or "".
-text_member :: (value: Json, name: string -> string) {
-    if found := member(value, name) {
+text_member :: (value: Json.Json_Value, name: string -> string) {
+    if found := Json.member(value, name) {
         if found is text then return text
         return ""
     } else if absent {
@@ -290,9 +300,9 @@ text_member :: (value: Json, name: string -> string) {
 }
 
 // A member that's a list of strings (others left out), or none.
-texts_member :: (value: Json, name: string -> [] string) {
+texts_member :: (value: Json.Json_Value, name: string -> [] string) {
     *texts: [..] string
-    if found := member(value, name) {
+    if found := Json.member(value, name) {
         if found is list {
             for item: list { if item is text { texts.add(text) } }
         }
@@ -305,51 +315,60 @@ texts_member :: (value: Json, name: string -> [] string) {
 //- the protocol: JSON-RPC 2.0, a message a line
 
 handle :: (line: string) {
-    if trim(line).count == 0 then return
-    if request := parse_json(line) {
-        method := text_member(request, "method")
-        *id: Json
-        *has_id := false
-        if given := member(request, "id") is not absent {
-            id = given
-            has_id = true
+    scratch.rewind_at_end()
+    `scratch {
+        if String.trim(line).count == 0 then return
+        if request := Json.parse_json(line) {
+            method := text_member(request, "method")
+            *id: Json.Json_Value
+            *has_id := false
+            if given := Json.member(request, "id") is not absent {
+                id = given
+                has_id = true
+            }
+            if !has_id then return        // a notification (notifications/initialized, ...): nothing to answer
+            *params: Json.Json_Value
+            if p := Json.member(request, "params") is not absent { params = p }
+            *result: [..] u8
+            if method == "tools/list" {
+                list_tools(result)
+            } else if method == "tools/call" {
+                call_tool(result, params)
+            } else if method == "ping" {
+                append(result, "{}")
+            } else {
+                respond_error(id, -32601, "there's no method '«method»'")
+                return
+            }
+            respond(id, string'result)
+        } else if bad_json {
+            respond_error(Json.Json_Value.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
         }
-        if !has_id then return        // a notification (notifications/initialized, ...): nothing to answer
-        *params: Json
-        if p := member(request, "params") is not absent { params = p }
-        *result: [..] u8
-        if method == "tools/list" {
-            list_tools(result)
-        } else if method == "tools/call" {
-            call_tool(result, params)
-        } else if method == "ping" {
-            append(result, "{}")
-        } else {
-            respond_error(id, -32601, "there's no method '«method»'")
-            return
-        }
-        respond(id, string'result)
-    } else if bad_json {
-        respond_error(Json.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
     }
 }
 
-respond :: (id: Json, result: string) {
-    *out: [..] u8
-    append(out, #"{"jsonrpc":"2.0","id":"#)
-    write_json(out, id)
-    append(out, #","result":"#, result, "}")
-    echo(string'out)
+respond :: (id: Json.Json_Value, result: string) {
+    scratch.rewind_at_end()
+    `scratch {
+        *out: [..] u8
+        append(out, #"{"jsonrpc":"2.0","id":"#)
+        Json.write_json(out, id)
+        append(out, #","result":"#, result, "}")
+        echo(string'out)
+    }
 }
 
-respond_error :: (id: Json, code: i64, message: string) {
-    *out: [..] u8
-    append(out, #"{"jsonrpc":"2.0","id":"#)
-    write_json(out, id)
-    append(out, #","error":{"code":«code»,"message":"#)
-    write_json_text(out, message)
-    append(out, "}}")
-    echo(string'out)
+respond_error :: (id: Json.Json_Value, code: i64, message: string) {
+    scratch.rewind_at_end()
+    `scratch {
+        *out: [..] u8
+        append(out, #"{"jsonrpc":"2.0","id":"#)
+        Json.write_json(out, id)
+        append(out, #","error":{"code":«code»,"message":"#)
+        Json.write_json_text(out, message)
+        append(out, "}}")
+        echo(string'out)
+    }
 }
 
 
@@ -358,89 +377,94 @@ respond_error :: (id: Json, code: i64, message: string) {
 ARGUMENTS_SCHEMA :: #"{"type":"array","items":{"type":"string"}}"#
 
 list_tools :: (out: *[..] u8) {
-    append(out, #"{"tools":["#)
-    tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default; it ends what the program started too). Gives its exit code, output and errors. Not git: that's the git tool's.",
-         #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"timeout":{"type":"number"}},"required":["program"]}"#)
-    append(out, ",")
-    tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/*). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
-         #"{"type":"object","properties":{"operation":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"},"folder":{"type":"string"},"permanent":{"type":"boolean"}},"required":["operation"]}"#)
-    append(out, ",")
-    tool(out, "edit", #"Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text ("") that doesn't exist is made with new as its contents. Paths are the project's."#,
-         #"{"type":"object","properties":{"edits":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"},"count":{"type":"integer"}},"required":["file","old","new"]}}},"required":["edits"]}"#)
-    append(out, ",")
-    tool(out, "files", #"Files and folders, with no program to write: list (path, the project's folder by default: each entry's size, when it was last written, and its name; all: true for everything beneath it too), copy or move (from, to: a file, or a folder and all in it; files there are replaced, and the folders on the way made), and delete (paths: files, or folders with everything in them; read-only files are made writable first). Paths are the project's unless whole."#,
-         #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","copy","move","delete"]},"path":{"type":"string"},"all":{"type":"boolean"},"from":{"type":"string"},"to":{"type":"string"},"paths":«ARGUMENTS_SCHEMA»},"required":["operation"]}"#)
-    append(out, ",")
-    tool(out, "processes", #"The running processes: list (each one's id, its parent's, and its program; name to show only those whose program's name contains it), or end (name: every process of that program, such as «EXAMPLE_PROGRAM»; or ids). buckram, and what started it (the agent's own client), are never ended."#,
-         #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","end"]},"name":{"type":"string"},"ids":{"type":"array","items":{"type":"integer"}}},"required":["operation"]}"#)
-    append(out, ",")
-    *names: [..] u8
-    for task, i: config.tasks {
-        if i > 0 then append(names, ", ")
-        append(names, task.name)
-    }
-    if names.count == 0 then append(names, "none yet")
-    *others := ""
-    if config.elsewhere.count > 0 then others = " Tasks with commands only for other systems, so not here: «elsewhere_names()»."
-    tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now, for «THIS_SYSTEM»: «string'names».«others»",
-         #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}},"required":["name"]}"#)
-    append(out, ",")
-    tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. A task that has a command for each system («THIS_SYSTEM» and «OTHER_SYSTEM») gets this one's, the other's kept; any other is one command for every system. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
-         #"{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"run":«ARGUMENTS_SCHEMA»,"arguments":{"type":"string","enum":["none","list"]},"timeout":{"type":"number"}},"required":["name","run"]}"#)
-    append(out, ",")
-    tool(out, "remove_task", "Takes a task out of the project's buckram.json: from a task with a command for each system, only this one's («THIS_SYSTEM»'s), and the task once it has none.",
-         #"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#)
-    for task: config.tasks {
+    `scratch {
+        append(out, #"{"tools":["#)
+        tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default; it ends what the program started too). Gives its exit code, output and errors. Not git: that's the git tool's.",
+             #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"timeout":{"type":"number"}},"required":["program"]}"#)
         append(out, ",")
-        *description := task.description
-        if description == "" then description = "Runs the project's task '«task.name»'."
-        if task.takes == .LIST {
-            tool(out, task.name, "«description» Arguments given as a list are added after its own. It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.",
-                 #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}}}"#)
-        } else {
-            tool(out, task.name, "«description» It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.", #"{"type":"object","properties":{"timeout":{"type":"number"}}}"#)
+        tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/*). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
+             #"{"type":"object","properties":{"operation":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"},"folder":{"type":"string"},"permanent":{"type":"boolean"}},"required":["operation"]}"#)
+        append(out, ",")
+        tool(out, "edit", #"Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text ("") that doesn't exist is made with new as its contents. Paths are the project's."#,
+             #"{"type":"object","properties":{"edits":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"},"count":{"type":"integer"}},"required":["file","old","new"]}}},"required":["edits"]}"#)
+        append(out, ",")
+        tool(out, "files", #"Files and folders, with no program to write: list (path, the project's folder by default: each entry's size, when it was last written, and its name; all: true for everything beneath it too), copy or move (from, to: a file, or a folder and all in it; files there are replaced, and the folders on the way made), and delete (paths: files, or folders with everything in them; read-only files are made writable first). Paths are the project's unless whole."#,
+             #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","copy","move","delete"]},"path":{"type":"string"},"all":{"type":"boolean"},"from":{"type":"string"},"to":{"type":"string"},"paths":«ARGUMENTS_SCHEMA»},"required":["operation"]}"#)
+        append(out, ",")
+        tool(out, "processes", #"The running processes: list (each one's id, its parent's, and its program; name to show only those whose program's name contains it), or end (name: every process of that program, such as «EXAMPLE_PROGRAM»; or ids). buckram, and what started it (the agent's own client), are never ended."#,
+             #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","end"]},"name":{"type":"string"},"ids":{"type":"array","items":{"type":"integer"}}},"required":["operation"]}"#)
+        append(out, ",")
+        *names: [..] u8
+        for task, i: config.tasks {
+            if i > 0 then append(names, ", ")
+            append(names, task.name)
         }
+        if names.count == 0 then append(names, "none yet")
+        *others := ""
+        if config.elsewhere.count > 0 then others = " Tasks with commands only for other systems, so not here: «elsewhere_names()»."
+        tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now, for «THIS_SYSTEM»: «string'names».«others»",
+             #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}},"required":["name"]}"#)
+        append(out, ",")
+        tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. A task that has a command for each system («THIS_SYSTEM» and «OTHER_SYSTEM») gets this one's, the other's kept; any other is one command for every system. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
+             #"{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"run":«ARGUMENTS_SCHEMA»,"arguments":{"type":"string","enum":["none","list"]},"timeout":{"type":"number"}},"required":["name","run"]}"#)
+        append(out, ",")
+        tool(out, "remove_task", "Takes a task out of the project's buckram.json: from a task with a command for each system, only this one's («THIS_SYSTEM»'s), and the task once it has none.",
+             #"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#)
+        for task: config.tasks {
+            append(out, ",")
+            *description := task.description
+            if description == "" then description = "Runs the project's task '«task.name»'."
+            if task.takes == .LIST {
+                tool(out, task.name, "«description» Arguments given as a list are added after its own. It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.",
+                     #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}}}"#)
+            } else {
+                tool(out, task.name, "«description» It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.", #"{"type":"object","properties":{"timeout":{"type":"number"}}}"#)
+            }
+        }
+        append(out, "]}")
     }
-    append(out, "]}")
 }
 
 tool :: (out: *[..] u8, name: string, description: string, schema: string) {
     append(out, #"{"name":"#)
-    write_json_text(out, name)
+    Json.write_json_text(out, name)
     append(out, #","description":"#)
-    write_json_text(out, description)
+    Json.write_json_text(out, description)
     append(out, #","inputSchema":"#, schema, "}")
 }
 
-call_tool :: (out: *[..] u8, params: Json) {
-    start := current_time_monotonic()
+call_tool :: (out: *[..] u8, params: Json.Json_Value) {
+    start := Time.current_time_monotonic()
     name := text_member(params, "name")
-    *arguments: Json
-    if given := member(params, "arguments") is not absent { arguments = given }
+    *arguments: Json.Json_Value
+    if given := Json.member(params, "arguments") is not absent { arguments = given }
     call_named_tool(out, name, arguments)
-    record_call(name, arguments, current_time_monotonic() - start, string'out)
+    record_call(name, arguments, Time.current_time_monotonic() - start, string'out)
 }
 
 ERROR_RESULT_END :: #""isError":true}"#
 
 // The call's line in output_folder/calls.<machine>.jsonl.
-record_call :: (name: string, arguments: Json, took: Apollo_Time, result: string) {
-    folder := join_path(config.folder, config.output_folder)
-    if !folder_exists(folder) { if create_folder(folder) is os_error { } }
-    *ms: i64 = 0
-    if m := to_milliseconds(took, true) { ms = m } else if too_big { }
-    *line: [..] u8
-    append(line, #"{"time":"#)
-    write_json_text(line, "«current_time_consensus()»")
-    append(line, #","tool":"#)
-    write_json_text(line, name)
-    append(line, #","arguments":"#)
-    write_json(line, arguments)
-    append(line, #","ms":«ms»,"error":«ends_with(result, ERROR_RESULT_END)»,"bytes":«result.count»}"#, "\n")
-    if append_file(join_path(folder, "calls.«config.machine».jsonl"), string'line) is absent or os_error { }
+record_call :: (name: string, arguments: Json.Json_Value, took: Time.Apollo_Time, result: string) {
+    `scratch {
+        folder := File.join_path(config.folder, config.output_folder)
+        if !File.folder_exists(folder) { if File.create_folder(folder) is os_error { } }
+        *ms: i64 = 0
+        if m := Time.to_milliseconds(took, true) { ms = m } else if too_big { }
+        *line: [..] u8
+        append(line, #"{"time":"#)
+        now := Time.current_time_consensus()
+        Json.write_json_text(line, "«now»")
+        append(line, #","tool":"#)
+        Json.write_json_text(line, name)
+        append(line, #","arguments":"#)
+        Json.write_json(line, arguments)
+        append(line, #","ms":«ms»,"error":«String.ends_with(result, ERROR_RESULT_END)»,"bytes":«result.count»}"#, "\n")
+        if File.append_file(File.join_path(folder, "calls.«config.machine».jsonl"), string'line) is absent or os_error { }
+    }
 }
 
-call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
+call_named_tool :: (out: *[..] u8, name: string, arguments: Json.Json_Value) {
     // Each tool's parameters: one it hasn't is refused, rather than
     // dropped without a word.
     if name == "run" { if takes_only(out, name, arguments, "program:text arguments:texts folder:text input:text timeout:seconds") then run_tool(out, arguments); return }
@@ -484,21 +508,23 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json) {
 // (a list of text), bool, seconds (a number, or text of one), integers (a
 // list of whole numbers) and list. A null is a parameter not given. If one
 // isn't right, its error is the result.
-takes_only :: (out: *[..] u8, tool_name: string, arguments: Json, parameters: string -> bool) {
+takes_only :: (out: *[..] u8, tool_name: string, arguments: Json.Json_Value, parameters: string -> bool) {
     *names: [..] u8
-    for parameter, i: split(parameters, " ") {
-        if i > 0 then append(names, ", ")
-        append(names, before_colon(parameter))
+    `scratch {
+        for parameter, i: String.split(parameters, " ") {
+            if i > 0 then append(names, ", ")
+            append(names, before_colon(parameter))
+        }
     }
     if arguments is object {
         for given, k: object.names {
             *type := ""
-            for parameter: split(parameters, " ") { if before_colon(parameter) == given then type = after_colon(parameter) }
+            for parameter: `scratch String.split(parameters, " ") { if before_colon(parameter) == given then type = after_colon(parameter) }
             if type == "" {
                 tool_result(out, "«tool_name» has no parameter '«given»' (its parameters: «string'names»)", true)
                 return false
             }
-            why := wrong_type(object.values[k], type)
+            why := `scratch wrong_type(object.values[k], type)
             if why != "" {
                 tool_result(out, "«possessive(tool_name)» «given» «why»", true)
                 return false
@@ -509,16 +535,16 @@ takes_only :: (out: *[..] u8, tool_name: string, arguments: Json, parameters: st
 }
 
 before_colon :: (parameter: string -> string) {
-    if at := first_index(parameter, ":") { return parameter[:at] } else if absent { return parameter }
+    if at := String.first_index(parameter, ":") { return parameter[:at] } else if absent { return parameter }
 }
 
 after_colon :: (parameter: string -> string) {
-    if at := first_index(parameter, ":") { return parameter[at + 1:] } else if absent { return "" }
+    if at := String.first_index(parameter, ":") { return parameter[at + 1:] } else if absent { return "" }
 }
 
 // What's wrong with a parameter's value for its type ("is text, not the
 // number 5"), or "".
-wrong_type :: (value: Json, type: string -> string) {
+wrong_type :: (value: Json.Json_Value, type: string -> string) {
     if value is none then return ""
     if type == "text" {
         if value is text then return ""
@@ -556,7 +582,7 @@ wrong_type :: (value: Json, type: string -> string) {
             for item, i: list {
                 *whole := false
                 if item is number {
-                    if n := to_i64(number) is not invalid or too_big { whole = true }
+                    if n := String.to_i64(number) is not invalid or too_big { whole = true }
                 }
                 if !whole then return "is a list of whole numbers, and its item «i + 1» is «described(item)»"
             }
@@ -569,12 +595,12 @@ wrong_type :: (value: Json, type: string -> string) {
 
 // edit's, or processes'.
 possessive :: (name: string -> string) {
-    if ends_with(name, "s") then return "«name»'"
+    if String.ends_with(name, "s") then return "«name»'"
     return "«name»'s"
 }
 
 // A JSON value in words: the number 5, the text "x", true, a list.
-described :: (value: Json -> string) {
+described :: (value: Json.Json_Value -> string) {
     if value is none then return "null"
     if value is boolean { if boolean then return "true" else return "false" }
     if value is number then return "the number «number»"
@@ -592,15 +618,15 @@ seconds_text :: (seconds: f64 -> string) {
 
 // A number of seconds: given as a number, or a string of one (as agents
 // often give it); the fallback when it isn't given.
-seconds_member :: (value: Json, name: string, fallback: f64 -> seconds: f64) [bad_seconds: string] {
+seconds_member :: (value: Json.Json_Value, name: string, fallback: f64 -> seconds: f64) [bad_seconds: string] {
     seconds = fallback
-    if found := member(value, name) is not absent {
+    if found := Json.member(value, name) is not absent {
         if found is none {
             // not given
         } else if found is number {
-            if s := to_f64(number) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not «number»" }
+            if s := String.to_f64(number) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not «number»" }
         } else if found is text {
-            if s := to_f64(trim(text)) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not '«text»'" }
+            if s := String.to_f64(String.trim(text)) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not '«text»'" }
         } else {
             fail: bad_seconds = "«name» is a number of seconds"
         }
@@ -617,7 +643,7 @@ task_names :: (-> string) {
     return string'names
 }
 
-run_task :: (out: *[..] u8, task: Task, arguments: Json) {
+run_task :: (out: *[..] u8, task: Task, arguments: Json.Json_Value) {
     *command: [..] string
     for piece: task.command[1:] { command.add(piece) }
     if task.takes == .LIST {
@@ -625,7 +651,7 @@ run_task :: (out: *[..] u8, task: Task, arguments: Json) {
     }
     // A program given as a path (build/rain.exe) is the project's.
     *program := task.command[0]
-    if contains_any(program, "/\\") then program = in_project(program)
+    if String.contains_any(program, "/\\") then program = in_project(program)
     // Its timeout, or the call's.
     *timeout := task.timeout
     if seconds := seconds_member(arguments, "timeout", task.timeout) {
@@ -640,14 +666,26 @@ run_task :: (out: *[..] u8, task: Task, arguments: Json) {
 //- Changing the tasks
 
 // buckram.json as it is (an object), or an empty one if there's none.
-read_config_file :: (-> value: Json) [bad_config: string] {
-    value = Json.object(⟨⟩)
-    if contents := read_file(join_path(config.folder, CONFIG_FILE)) is {
-        case absent:
-        case os_error:
-            fail: bad_config = "«CONFIG_FILE» can't be read («os_error»)"
-    } else {
-        if parsed := parse_json(contents) {
+read_config_file :: (-> value: Json.Json_Value) [bad_config: string] {
+    value = Json.Json_Value.object(⟨⟩)
+    *contents := ""                              // (in scratch: what's parsed from it is copied)
+    *read := false
+    *unreadable := false
+    *why: File.System_Error
+    `scratch {
+        if found := File.read_file(File.join_path(config.folder, CONFIG_FILE)) is {
+            case absent:
+            case os_error:
+                unreadable = true
+                why = os_error
+        } else {
+            contents = found
+            read = true
+        }
+    }
+    if unreadable then fail: bad_config = "«CONFIG_FILE» can't be read («why»)"
+    if read {
+        if parsed := Json.parse_json(contents) {
             if parsed is object { value = parsed } else { fail: bad_config = "«CONFIG_FILE» isn't a JSON object, so it isn't changed" }
         } else if bad_json {
             fail: bad_config = "«CONFIG_FILE» isn't JSON (at byte «bad_json.at»: «bad_json.why»), so it isn't changed: fix it with edit"
@@ -657,9 +695,9 @@ read_config_file :: (-> value: Json) [bad_config: string] {
 
 // The object with its member of that name set to value (the first of the
 // name replaced, or it added at the end); or, with no value, taken out.
-with_member :: (object: Json_Object, name: string, value: Json, remove: bool -> Json_Object) {
+with_member :: (object: Json.Json_Object, name: string, value: Json.Json_Value, remove: bool -> Json.Json_Object) {
     *names: [..] string
-    *values: [..] Json
+    *values: [..] Json.Json_Value
     *done := false
     for n, i: object.names {
         if n == name and !done {
@@ -680,20 +718,22 @@ with_member :: (object: Json_Object, name: string, value: Json, remove: bool -> 
 }
 
 // Writes buckram.json, laid out to read.
-write_config_file :: (value: Json) [bad_config: string] {
-    *out: [..] u8
-    write_json(out, value, 2)
-    out.add("\n")
-    if write_file(join_path(config.folder, CONFIG_FILE), string'out) {
-    } else if absent {
-        fail: bad_config = "«CONFIG_FILE» can't be written: the project's folder isn't there"
-    } else if os_error {
-        fail: bad_config = "«CONFIG_FILE» can't be written («os_error»)"
+write_config_file :: (value: Json.Json_Value) [bad_config: string] {
+    `scratch {
+        *out: [..] u8
+        Json.write_json(out, value, 2)
+        out.add("\n")
+        if File.write_file(File.join_path(config.folder, CONFIG_FILE), string'out) {
+        } else if absent {
+            fail: bad_config = "«CONFIG_FILE» can't be written: the project's folder isn't there"
+        } else if os_error {
+            fail: bad_config = "«CONFIG_FILE» can't be written («os_error»)"
+        }
     }
 }
 
 // An object's members, or none for anything else.
-as_object :: (value: Json -> Json_Object) {
+as_object :: (value: Json.Json_Value -> Json.Json_Object) {
     if value is object { return object }
     return ⟨⟩
 }
@@ -707,121 +747,125 @@ good_name :: (name: string -> bool) {
     return true
 }
 
-add_task_tool :: (out: *[..] u8, arguments: Json) {
-    name := text_member(arguments, "name")
-    if !good_name(name) {
-        tool_result(out, "a task's name is letters, digits and _ (up to 48), as a tool's is: not '«name»'", true)
-        return
-    }
-    if is_own_tool(name) {
-        tool_result(out, "'«name»' is one of buckram's own tools, so a task can't have that name", true)
-        return
-    }
-    run := texts_member(arguments, "run")
-    if run.count == 0 {
-        tool_result(out, "add_task needs run: the program and its arguments, as a list of strings, the program first", true)
-        return
-    }
-    *takes := text_member(arguments, "arguments")
-    if takes == "" then takes = "none"
-    if takes != "none" and takes != "list" {
-        tool_result(out, #"a task's arguments is "none" or "list", not "«takes»""#, true)
-        return
-    }
-    // The task, as buckram.json holds one.
-    *names: [..] string
-    *values: [..] Json
-    description := text_member(arguments, "description")
-    if description != "" {
-        names.add("description")
-        values.add(Json.text(description))
-    }
-    *pieces: [..] Json
-    for piece: run { pieces.add(Json.text(piece)) }
-    *file: Json
-    if read := read_config_file() { file = read } else if bad_config {
-        tool_result(out, bad_config, true)
-        return
-    }
-    *tasks := Json_Object⟨⟩
-    if listed := member(file, "tasks") is not absent { tasks = as_object(listed) }
-    // Its run: this system's command, in a task with one for each (the
-    // other's kept); or else its one command.
-    *run_value := Json.list(pieces)
-    *how := "added to «CONFIG_FILE»"
-    if existing := member(Json.object(tasks), name) is not absent {
-        how = "replaced in «CONFIG_FILE»"
-        if old_run := member(existing, "run") is not absent {
-            if old_run is object {
-                run_value = Json.object(with_member(object, THIS_SYSTEM, Json.list(pieces), false))
-                how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM»"
-                for system: object.names { if system == OTHER_SYSTEM then how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM» («OTHER_SYSTEM» keeps its own command)" }
+add_task_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+    `scratch {
+        name := text_member(arguments, "name")
+        if !good_name(name) {
+            tool_result(out, "a task's name is letters, digits and _ (up to 48), as a tool's is: not '«name»'", true)
+            return
+        }
+        if is_own_tool(name) {
+            tool_result(out, "'«name»' is one of buckram's own tools, so a task can't have that name", true)
+            return
+        }
+        run := texts_member(arguments, "run")
+        if run.count == 0 {
+            tool_result(out, "add_task needs run: the program and its arguments, as a list of strings, the program first", true)
+            return
+        }
+        *takes := text_member(arguments, "arguments")
+        if takes == "" then takes = "none"
+        if takes != "none" and takes != "list" {
+            tool_result(out, #"a task's arguments is "none" or "list", not "«takes»""#, true)
+            return
+        }
+        // The task, as buckram.json holds one.
+        *names: [..] string
+        *values: [..] Json.Json_Value
+        description := text_member(arguments, "description")
+        if description != "" {
+            names.add("description")
+            values.add(Json.Json_Value.text(description))
+        }
+        *pieces: [..] Json.Json_Value
+        for piece: run { pieces.add(Json.Json_Value.text(piece)) }
+        *file: Json.Json_Value
+        if read := read_config_file() { file = read } else if bad_config {
+            tool_result(out, bad_config, true)
+            return
+        }
+        *tasks := Json.Json_Object⟨⟩
+        if listed := Json.member(file, "tasks") is not absent { tasks = as_object(listed) }
+        // Its run: this system's command, in a task with one for each (the
+        // other's kept); or else its one command.
+        *run_value := Json.Json_Value.list(pieces)
+        *how := "added to «CONFIG_FILE»"
+        if existing := Json.member(Json.Json_Value.object(tasks), name) is not absent {
+            how = "replaced in «CONFIG_FILE»"
+            if old_run := Json.member(existing, "run") is not absent {
+                if old_run is object {
+                    run_value = Json.Json_Value.object(with_member(object, THIS_SYSTEM, Json.Json_Value.list(pieces), false))
+                    how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM»"
+                    for system: object.names { if system == OTHER_SYSTEM then how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM» («OTHER_SYSTEM» keeps its own command)" }
+                }
             }
         }
-    }
-    names.add("run")
-    values.add(run_value)
-    if takes == "list" {
-        names.add("arguments")
-        values.add(Json.text("list"))
-    }
-    if t := member(arguments, "timeout") is not absent {
-        if t is number {
-            names.add("timeout")
-            values.add(t)
+        names.add("run")
+        values.add(run_value)
+        if takes == "list" {
+            names.add("arguments")
+            values.add(Json.Json_Value.text("list"))
         }
+        if t := Json.member(arguments, "timeout") is not absent {
+            if t is number {
+                names.add("timeout")
+                values.add(t)
+            }
+        }
+        task := Json.Json_Value.object(⟨names, values⟩)
+        updated := Json.Json_Value.object(with_member(as_object(file), "tasks", Json.Json_Value.object(with_member(tasks, name, task, false)), false))
+        if write_config_file(updated) is bad_config {
+            tool_result(out, bad_config, true)
+            return
+        }
+        tool_result(out, "the task '«name»' is «how». It's a tool of its own once the client lists buckram's tools again (buckram has told it they've changed); until then, task with name '«name»' runs it.", false)
     }
-    task := Json.object(⟨names, values⟩)
-    updated := Json.object(with_member(as_object(file), "tasks", Json.object(with_member(tasks, name, task, false)), false))
-    if write_config_file(updated) is bad_config {
-        tool_result(out, bad_config, true)
-        return
-    }
-    tool_result(out, "the task '«name»' is «how». It's a tool of its own once the client lists buckram's tools again (buckram has told it they've changed); until then, task with name '«name»' runs it.", false)
 }
 
-remove_task_tool :: (out: *[..] u8, arguments: Json) {
-    name := text_member(arguments, "name")
-    *file: Json
-    if read := read_config_file() { file = read } else if bad_config {
-        tool_result(out, bad_config, true)
-        return
-    }
-    *tasks := Json_Object⟨⟩
-    if listed := member(file, "tasks") is not absent { tasks = as_object(listed) }
-    *existing: Json
-    if found := member(Json.object(tasks), name) { existing = found } else if absent {
-        tool_result(out, "there's no task '«name»' in «CONFIG_FILE» (its tasks for «THIS_SYSTEM»: «task_names()»)", true)
-        return
-    }
-    // From a task with a command for each system, only this one's; any
-    // other goes whole.
-    *updated_tasks := with_member(tasks, name, ⟨⟩, true)
-    *how := "taken out of «CONFIG_FILE»"
-    if run := member(existing, "run") is not absent {
-        if run is object {
-            *has_this := false
-            for system: object.names { if system == THIS_SYSTEM then has_this = true }
-            if !has_this {
-                tool_result(out, "the task '«name»' has no command for «THIS_SYSTEM», so it's left as it is (its commands are for «join(object.names, ", ")»)", true)
-                return
-            }
-            rest := with_member(object, THIS_SYSTEM, ⟨⟩, true)
-            if rest.names.count > 0 {
-                updated_tasks = with_member(tasks, name, Json.object(with_member(as_object(existing), "run", Json.object(rest), false)), false)
-                how = "taken out of «CONFIG_FILE» for «THIS_SYSTEM» («join(rest.names, ", ")» keeps its command)"
+remove_task_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+    `scratch {
+        name := text_member(arguments, "name")
+        *file: Json.Json_Value
+        if read := read_config_file() { file = read } else if bad_config {
+            tool_result(out, bad_config, true)
+            return
+        }
+        *tasks := Json.Json_Object⟨⟩
+        if listed := Json.member(file, "tasks") is not absent { tasks = as_object(listed) }
+        *existing: Json.Json_Value
+        if found := Json.member(Json.Json_Value.object(tasks), name) { existing = found } else if absent {
+            tool_result(out, "there's no task '«name»' in «CONFIG_FILE» (its tasks for «THIS_SYSTEM»: «task_names()»)", true)
+            return
+        }
+        // From a task with a command for each system, only this one's; any
+        // other goes whole.
+        *updated_tasks := with_member(tasks, name, ⟨⟩, true)
+        *how := "taken out of «CONFIG_FILE»"
+        if run := Json.member(existing, "run") is not absent {
+            if run is object {
+                *has_this := false
+                for system: object.names { if system == THIS_SYSTEM then has_this = true }
+                if !has_this {
+                    tool_result(out, "the task '«name»' has no command for «THIS_SYSTEM», so it's left as it is (its commands are for «String.join(object.names, ", ")»)", true)
+                    return
+                }
+                rest := with_member(object, THIS_SYSTEM, ⟨⟩, true)
+                if rest.names.count > 0 {
+                    updated_tasks = with_member(tasks, name, Json.Json_Value.object(with_member(as_object(existing), "run", Json.Json_Value.object(rest), false)), false)
+                    how = "taken out of «CONFIG_FILE» for «THIS_SYSTEM» («String.join(rest.names, ", ")» keeps its command)"
+                }
             }
         }
+        updated := Json.Json_Value.object(with_member(as_object(file), "tasks", Json.Json_Value.object(updated_tasks), false))
+        if write_config_file(updated) is bad_config {
+            tool_result(out, bad_config, true)
+            return
+        }
+        tool_result(out, "the task '«name»' is «how»", false)
     }
-    updated := Json.object(with_member(as_object(file), "tasks", Json.object(updated_tasks), false))
-    if write_config_file(updated) is bad_config {
-        tool_result(out, bad_config, true)
-        return
-    }
-    tool_result(out, "the task '«name»' is «how»", false)
 }
 
-run_tool :: (out: *[..] u8, arguments: Json) {
+run_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
     program := text_member(arguments, "program")
     if program == "" {
         tool_result(out, "run needs a program", true)
@@ -845,65 +889,67 @@ run_tool :: (out: *[..] u8, arguments: Json) {
 
 // Is the program git (git, git.exe, or a path to one)?
 is_git :: (program: string -> bool) {
-    name := to_lower(file_name(program))
+    name := `scratch String.to_lower(File.file_name(program))
     return name == "git" or name == "git.exe"
 }
 
-git_tool :: (out: *[..] u8, arguments: Json) {
-    *operation := text_member(arguments, "operation")
-    if operation == "" then operation = text_member(arguments, "command")     // (its name before 741)
-    if operation == "" {
-        tool_result(out, "git needs an operation: status, diff, log, show, add, commit, or any other of git's commands", true)
-        return
-    }
-    *folder := text_member(arguments, "folder")
-    if folder == "" { folder = config.folder } else { folder = in_project(folder) }
-    extra := texts_member(arguments, "arguments")
-    // One that makes a loss permanent is run only when asked to be.
-    loss := permanent_loss(operation, extra)
-    if loss.count > 0 and !bool_member(arguments, "permanent") {
-        tool_result(out, "git «operation» «join(extra, " ")» «loss»: that can't be undone, so it's run only with \"permanent\": true", true)
-        return
-    }
-    // One that can lose uncommitted work: the working tree is saved first.
-    *saved := ""
-    if !only_looks(operation, extra) {
-        if commit := save_working_tree(folder, operation) {
-            saved = commit
-        } else if failed {
-            tool_result(out, "the working tree couldn't be saved first, so git «operation» wasn't run: «failed»", true)
+git_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+    `scratch {
+        *operation := text_member(arguments, "operation")
+        if operation == "" then operation = text_member(arguments, "command")     // (its name before 741)
+        if operation == "" {
+            tool_result(out, "git needs an operation: status, diff, log, show, add, commit, or any other of git's commands", true)
             return
         }
-    }
-    *line: [..] string
-    line.add("-c")
-    line.add("core.quotepath=false")
-    line.add(operation)
-    *input := ""
-    if operation == "commit" {
-        message := text_member(arguments, "message")
-        if message == "" {
-            tool_result(out, "a commit needs its message, as message", true)
+        *folder := text_member(arguments, "folder")
+        if folder == "" { folder = config.folder } else { folder = in_project(folder) }
+        extra := texts_member(arguments, "arguments")
+        // One that makes a loss permanent is run only when asked to be.
+        loss := permanent_loss(operation, extra)
+        if loss.count > 0 and !bool_member(arguments, "permanent") {
+            tool_result(out, "git «operation» «String.join(extra, " ")» «loss»: that can't be undone, so it's run only with \"permanent\": true", true)
             return
         }
-        line.add("-F")
-        line.add("-")
-        input = message
+        // One that can lose uncommitted work: the working tree is saved first.
+        *saved := ""
+        if !only_looks(operation, extra) {
+            if commit := save_working_tree(folder, operation) {
+                saved = commit
+            } else if failed {
+                tool_result(out, "the working tree couldn't be saved first, so git «operation» wasn't run: «failed»", true)
+                return
+            }
+        }
+        *line: [..] string
+        line.add("-c")
+        line.add("core.quotepath=false")
+        line.add(operation)
+        *input := ""
+        if operation == "commit" {
+            message := text_member(arguments, "message")
+            if message == "" {
+                tool_result(out, "a commit needs its message, as message", true)
+                return
+            }
+            line.add("-F")
+            line.add("-")
+            input = message
+        }
+        for piece: extra { line.add(piece) }
+        *note := ""
+        if saved.count > 0 {
+            note = "(the working tree was saved first, untracked files too, as commit «saved[:12]»: git restore --source=«saved[:12]» -- <path> brings a file back)\n"
+        }
+        run_program(out, "git", ⟨folder: folder, input: input, timeout: DEFAULT_TIMEOUT⟩, "git", line, note)
     }
-    for piece: extra { line.add(piece) }
-    *note := ""
-    if saved.count > 0 {
-        note = "(the working tree was saved first, untracked files too, as commit «saved[:12]»: git restore --source=«saved[:12]» -- <path> brings a file back)\n"
-    }
-    run_program(out, "git", ⟨folder: folder, input: input, timeout: DEFAULT_TIMEOUT⟩, "git", line, note)
 }
 
 // Does a git command only look, or only add to what's kept?
 only_looks :: (operation: string, extra: [] string -> bool) {
     if operation == "stash" then return extra.count > 0 and (extra[0] == "list" or extra[0] == "show")
     if operation == "worktree" then return extra.count > 0 and extra[0] == "list"
-    if operation == "reflog" then return extra.count == 0 or extra[0] == "show" or extra[0] == "exists" or starts_with(extra[0], "-")
-    for name: split(LOOKING, " ") { if name == operation then return true }
+    if operation == "reflog" then return extra.count == 0 or extra[0] == "show" or extra[0] == "exists" or String.starts_with(extra[0], "-")
+    for name: String.split(LOOKING, " ") { if name == operation then return true }
     return false
 }
 
@@ -915,12 +961,12 @@ permanent_loss :: (operation: string, extra: [] string -> string) {
     if operation == "prune" then return "deletes what no ref or reflog reaches"
     if operation == "gc" {
         for piece: extra {
-            if starts_with(piece, "--prune") and piece != "--prune=never" then return "deletes what no ref or reflog reaches"
+            if String.starts_with(piece, "--prune") and piece != "--prune=never" then return "deletes what no ref or reflog reaches"
         }
     }
     if operation == "push" {
         for piece: extra {
-            if piece == "-f" or starts_with(piece, "--force") or piece == "--mirror" or piece == "--delete" or piece == "-d" or starts_with(piece, "+") or starts_with(piece, ":") {
+            if piece == "-f" or String.starts_with(piece, "--force") or piece == "--mirror" or piece == "--delete" or piece == "-d" or String.starts_with(piece, "+") or String.starts_with(piece, ":") {
                 return "overwrites or deletes history on the remote"
             }
         }
@@ -936,33 +982,49 @@ save_working_tree :: (folder: string, operation: string -> commit: string) [fail
     commit = ""
     status := git_output(folder, "status", "--porcelain", "--untracked-files=all")
     if status.failed then fail: failed = status.text
-    if trim(status.text).count == 0 then return
+    if String.trim(status.text).count == 0 then return
     index := git_path(folder, "index")
     if index.failed then fail: failed = index.text
     copy := git_path(folder, "buckram-saved-index")
     if copy.failed then fail: failed = copy.text
-    if file_exists(index.text) {
-        if copy_file(index.text, copy.text) is absent or os_error then fail: failed = "the index can't be copied to «copy.text»"
+    if File.file_exists(index.text) {
+        if File.copy_file(index.text, copy.text) is absent or os_error then fail: failed = "the index can't be copied to «copy.text»"
     }
-    if set_environment("GIT_INDEX_FILE", copy.text) is os_error then fail: failed = "GIT_INDEX_FILE can't be set"
+    // GIT_INDEX_FILE names the copy for these two commands only, then is put
+    // back as it was (removed, if it wasn't set): the command itself, and
+    // any later one, finds its own index, which for one in another folder
+    // or worktree isn't this folder's.
+    *had_index_file := false
+    *index_file_was := ""
+    `scratch {
+        if value := System.environment("GIT_INDEX_FILE") {
+            had_index_file = true
+            index_file_was = value
+        } else if absent or os_error {
+        }
+    }
+    if System.set_environment("GIT_INDEX_FILE", copy.text) is os_error then fail: failed = "GIT_INDEX_FILE can't be set"
     added := git_output(folder, "add", "-A")
     tree := git_output(folder, "write-tree")
-    // (back to the real index, for the command itself)
-    if set_environment("GIT_INDEX_FILE", index.text) is os_error then fail: failed = "GIT_INDEX_FILE can't be set back"
-    if delete_file(copy.text) is absent or os_error { }
+    if had_index_file {
+        if System.set_environment("GIT_INDEX_FILE", index_file_was) is os_error then fail: failed = "GIT_INDEX_FILE can't be set back"
+    } else {
+        if System.remove_environment("GIT_INDEX_FILE") is os_error then fail: failed = "GIT_INDEX_FILE can't be removed"
+    }
+    if File.delete_file(copy.text) is absent or os_error { }
     if added.failed then fail: failed = added.text
     if tree.failed then fail: failed = tree.text
     *made: Git_Output = ⟨⟩
     message := "buckram: the working tree before git «operation»"
     head := git_output(folder, "rev-parse", "--verify", "--quiet", "HEAD")
-    if head.failed or trim(head.text).count == 0 {
-        made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", trim(tree.text), "-m", message)
+    if head.failed or String.trim(head.text).count == 0 {
+        made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", String.trim(tree.text), "-m", message)
     } else {
-        made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", trim(tree.text), "-p", trim(head.text), "-m", message)
+        made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", String.trim(tree.text), "-p", String.trim(head.text), "-m", message)
     }
     if made.failed then fail: failed = made.text
-    commit = trim(made.text)
-    t := to_calendar(current_time_consensus(), .LOCAL)
+    commit = String.trim(made.text)
+    t := Time.to_calendar(Time.current_time_consensus(), .LOCAL)
     when := "«t.year»«t.month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»«t.day_of_month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»-«t.hour, ⟨width: 2, pad: "0"⟩»«t.minute, ⟨width: 2, pad: "0"⟩»«t.second, ⟨width: 2, pad: "0"⟩»-«t.millisecond, ⟨width: 3, pad: "0"⟩»"
     kept := git_output(folder, "update-ref", "refs/buckram/saved/«when»", commit)
     if kept.failed then fail: failed = kept.text
@@ -977,9 +1039,9 @@ Git_Output :: struct {
 
 git_output :: (folder: string, .. arguments: string -> result: Git_Output) {
     result = ⟨⟩
-    if code, output, errors, timed_out := run_with(⟨folder: folder, timeout: 120⟩, "git", arguments..) {
+    if code, output, errors, timed_out := System.run_with(⟨folder: folder, timeout: 120⟩, "git", arguments..) {
         result.text = output
-        if code != 0 or timed_out then result = ⟨"git «join(arguments, " ")»: «trim(errors)»", true⟩
+        if code != 0 or timed_out then result = ⟨"git «String.join(arguments, " ")»: «String.trim(errors)»", true⟩
     } else if absent or os_error {
         result = ⟨"git can't be run", true⟩
     }
@@ -989,20 +1051,20 @@ git_output :: (folder: string, .. arguments: string -> result: Git_Output) {
 git_path :: (folder: string, name: string -> result: Git_Output) {
     result = git_output(folder, "rev-parse", "--git-path", name)
     if result.failed then return
-    path := trim(result.text)
-    if is_whole(path) { result.text = path } else { result.text = join_path(folder, path) }
+    path := String.trim(result.text)
+    if is_whole(path) { result.text = path } else { result.text = File.join_path(folder, path) }
 }
 
 // A path the agent gives: the project's, unless it's whole already.
 in_project :: (path: string -> string) {
     if is_whole(path) then return path
-    return join_path(config.folder, path)
+    return File.join_path(config.folder, path)
 }
 
 // Is the path whole (C:/x, /x, or \x), not from a folder?
 is_whole :: (path: string -> bool) {
     if path.count >= 2 and path[1] == ":" then return true
-    return starts_with(path, "/") or starts_with(path, "\\")
+    return String.starts_with(path, "/") or String.starts_with(path, "\\")
 }
 
 Edit :: struct {
@@ -1022,7 +1084,7 @@ Changed :: struct {
 // file, old and new given as text (file not empty; old empty to make a new
 // file), and count, if given, a whole number of times, 1 or more. Gives
 // the error, or "".
-read_edit :: (item: Json, k: i64 -> e: Edit, error: string) {
+read_edit :: (item: Json.Json_Value, k: i64 -> e: Edit, error: string) {
     e = ⟨"", "", "", 1⟩
     error = ""
     if item is object {
@@ -1037,7 +1099,7 @@ read_edit :: (item: Json, k: i64 -> e: Edit, error: string) {
         return
     }
     for name: [] string⟨"file", "old", "new"⟩ {
-        if found := member(item, name) {
+        if found := Json.member(item, name) {
             if found is text {
                 if name == "file" then e.file = text
                 if name == "old" then e.old = text
@@ -1055,10 +1117,10 @@ read_edit :: (item: Json, k: i64 -> e: Edit, error: string) {
         error = "edit «k»'s file is empty: give the file's path"
         return
     }
-    if found := member(item, "count") is not absent {
+    if found := Json.member(item, "count") is not absent {
         *ok := false
         if found is number {
-            if n := to_i64(number) is not invalid or too_big {
+            if n := String.to_i64(number) is not invalid or too_big {
                 if n >= 1 {
                     e.count = n
                     ok = true
@@ -1072,86 +1134,88 @@ read_edit :: (item: Json, k: i64 -> e: Edit, error: string) {
     }
 }
 
-edit_tool :: (out: *[..] u8, arguments: Json) {
-    *edits: [..] Edit
-    if given := member(arguments, "edits") is not absent {
-        if given is list {
-            for item, i: list {
-                e, error := read_edit(item, i + 1)
-                if error != "" {
-                    tool_result(out, "«error» (nothing was written)", true)
-                    return
+edit_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+    `scratch {
+        *edits: [..] Edit
+        if given := Json.member(arguments, "edits") is not absent {
+            if given is list {
+                for item, i: list {
+                    e, error := read_edit(item, i + 1)
+                    if error != "" {
+                        tool_result(out, "«error» (nothing was written)", true)
+                        return
+                    }
+                    edits.add(e)
                 }
-                edits.add(e)
             }
         }
-    }
-    if edits.count == 0 {
-        tool_result(out, "edit needs edits: a list of {file, old, new}", true)
-        return
-    }
-    // Each file's text, with the edits made in turn; nothing written until
-    // all are found.
-    *files: [..] Changed
-    for e, k: edits {
-        path := in_project(e.file)
-        *at := -1
-        for f, i: files { if f.path == path then at = i }
-        if at < 0 {
-            if text := read_file(path) {
-                files.add(⟨path, text, false⟩)
+        if edits.count == 0 {
+            tool_result(out, "edit needs edits: a list of {file, old, new}", true)
+            return
+        }
+        // Each file's text, with the edits made in turn; nothing written until
+        // all are found.
+        *files: [..] Changed
+        for e, k: edits {
+            path := in_project(e.file)
+            *at := -1
+            for f, i: files { if f.path == path then at = i }
+            if at < 0 {
+                if text := File.read_file(path) {
+                    files.add(⟨path, text, false⟩)
+                } else if absent {
+                    if e.old != "" {
+                        tool_result(out, "edit «k + 1»: there's no file «e.file» (nothing was written)", true)
+                        return
+                    }
+                    files.add(⟨path, "", true⟩)
+                } else if os_error {
+                    tool_result(out, "edit «k + 1»: «e.file» can't be read: «os_error» (nothing was written)", true)
+                    return
+                }
+                at = files.count - 1
+            }
+            *f := ^files[at]
+            if e.old == "" {
+                if !f.made or f.text != "" {
+                    tool_result(out, "edit «k + 1»: an empty old text makes a new file, but «e.file» exists (nothing was written)", true)
+                    return
+                }
+                f.text = e.new
+                continue
+            }
+            found := String.count_of(f.text, e.old)
+            if found != e.count {
+                tool_result(out, "edit «k + 1»: its old text is in «e.file» «found» time«plural(found)», not «e.count» (nothing was written)", true)
+                return
+            }
+            f.text = String.replace(f.text, e.old, e.new)
+        }
+        for f: files {
+            if File.write_file(f.path, f.text) {
             } else if absent {
-                if e.old != "" {
-                    tool_result(out, "edit «k + 1»: there's no file «e.file» (nothing was written)", true)
-                    return
-                }
-                files.add(⟨path, "", true⟩)
+                tool_result(out, "«f.path» can't be written (its folder isn't there): the files before it in the list were", true)
+                return
             } else if os_error {
-                tool_result(out, "edit «k + 1»: «e.file» can't be read: «os_error» (nothing was written)", true)
+                tool_result(out, "«f.path» can't be written («os_error»): the files before it in the list were", true)
                 return
             }
-            at = files.count - 1
         }
-        *f := ^files[at]
-        if e.old == "" {
-            if !f.made or f.text != "" {
-                tool_result(out, "edit «k + 1»: an empty old text makes a new file, but «e.file» exists (nothing was written)", true)
-                return
-            }
-            f.text = e.new
-            continue
-        }
-        found := count_of(f.text, e.old)
-        if found != e.count {
-            tool_result(out, "edit «k + 1»: its old text is in «e.file» «found» time«plural(found)», not «e.count» (nothing was written)", true)
-            return
-        }
-        f.text = replace(f.text, e.old, e.new)
+        tool_result(out, "«edits.count» edit«plural(edits.count)» made, in «files.count» file«plural(files.count)»", false)
     }
-    for f: files {
-        if write_file(f.path, f.text) {
-        } else if absent {
-            tool_result(out, "«f.path» can't be written (its folder isn't there): the files before it in the list were", true)
-            return
-        } else if os_error {
-            tool_result(out, "«f.path» can't be written («os_error»): the files before it in the list were", true)
-            return
-        }
-    }
-    tool_result(out, "«edits.count» edit«plural(edits.count)» made, in «files.count» file«plural(files.count)»", false)
 }
 
 // Runs it, and gives back what happened as the tool's result (after the
 // note, if there is one).
-run_program :: (out: *[..] u8, tool_name: string, options: Run_Options, program: string, arguments: [] string, note: string = "") {
-    if code, output, errors, timed_out := run_with(options, program, arguments..) {
+run_program :: (out: *[..] u8, tool_name: string, options: System.Run_Options, program: string, arguments: [] string, note: string = "") {
+    if code, output, errors, timed_out := System.run_with(options, program, arguments..) {
         *text: [..] u8
         append(text, note)
         if timed_out { append(text, "timed out after «seconds_text(options.timeout)» seconds, so it was ended, with what it started\n") }
         else { append(text, "exit code «code»\n") }
         append(text, output)
         if errors.count > 0 {
-            if output.count > 0 and !ends_with(output, "\n") then append(text, "\n")
+            if output.count > 0 and !String.ends_with(output, "\n") then append(text, "\n")
             append(text, "--- errors ---\n", errors)
         }
         tool_result(out, limited(tool_name, string'text), timed_out or code != 0)
@@ -1166,11 +1230,11 @@ run_program :: (out: *[..] u8, tool_name: string, options: Run_Options, program:
 // start), the whole of it kept in the output folder.
 limited :: (tool_name: string, text: string -> string) {
     if text.count <= config.output_limit then return text
-    folder := join_path(config.folder, config.output_folder)
-    if !folder_exists(folder) { if create_folder(folder) is os_error { } }
-    path := join_path(folder, "«tool_name».«config.machine».txt")
+    folder := `scratch File.join_path(config.folder, config.output_folder)
+    if !File.folder_exists(folder) { if File.create_folder(folder) is os_error { } }
+    path := `scratch File.join_path(folder, "«tool_name».«config.machine».txt")
     *kept := "(it couldn't be kept)"
-    if write_file(path, text) is not absent or os_error then kept = "all of it is in «path»"
+    if File.write_file(path, text) is not absent or os_error then kept = "all of it is in «path»"
     half := config.output_limit / 2
     *head := half
     while head > 0 and (text[head] & 0xC0) == 0x80 { head -= 1 }
@@ -1187,6 +1251,6 @@ plural :: (n: i64 -> string) {
 
 tool_result :: (out: *[..] u8, text: string, is_error: bool) {
     append(out, #"{"content":[{"type":"text","text":"#)
-    write_json_text(out, text)
+    Json.write_json_text(out, text)
     append(out, #"}],"isError":«is_error»}"#)
 }
