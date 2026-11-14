@@ -9,11 +9,14 @@
 // The programs in bin/ are committed, so buckram can be used without
 // building it; build them again after changing src/.
 //
-// Windows won't overwrite a running exe, but will rename one, and the stub
-// runs as long as its agent's session: so one in use is moved into
-// bin/old_exes first, and runs on from there. Those no longer running are
-// cleared out each time. (The core runs only while it answers a message, so
-// it's rarely in use; it's treated the same way.)
+// Each is built under a new name first (bin/old_exes/new_buckram.exe), and
+// takes the old one's place only once it has built: so a build that fails
+// leaves bin/ as it was, and buckram still has its core. Windows won't
+// overwrite a running exe, but will rename one, and the stub runs as long
+// as its agent's session: so one in use is moved into bin/old_exes, and runs
+// on from there. Those no longer running are cleared out each time. (The
+// core runs only while it answers a message, so it's rarely in use; it's
+// treated the same way.)
 
 #import Console
 #import String
@@ -44,6 +47,25 @@ main :: (args: [] string) [failed: string] {
 build_one :: (compiler: string, here: string, old: string, source: string, exe: string, os: string) [failed: string] {
     `scratch {
         target := File.join_path(here, "bin", exe)
+        // Built beside the old ones first.
+        built := File.join_path(old, "new_«exe»")
+        if File.delete_file(built) is absent or os_error { }
+        if code, output, errors := System.run(compiler, File.join_path(here, source), "-os:«os»", "-out:«built»") {
+            // What a build through LLVM leaves beside it (its IR, object, and
+            // clang's messages): not buckram's.
+            for leftover: [] string⟨".ll", ".o", ".llvm.txt"⟩ {
+                if File.delete_file("«built»«leftover»") is absent or os_error { }
+            }
+            if code != 0 or !File.file_exists(built) {
+                if File.delete_file(built) is absent or os_error { }
+                fail: failed = "«source» didn't build, so bin/«exe» is as it was:\n«output»«errors»"
+            }
+        } else if absent {
+            fail: failed = "there's no compiler '«compiler»': give its path, build.exe C:/rain/build/rain.exe"
+        } else if os_error {
+            fail: failed = "the compiler couldn't be run («os_error»)"
+        }
+        // Then the old one goes, and the new one takes its place.
         if File.file_exists(target) {
             if File.delete_file(target) is {
                 case absent:
@@ -55,23 +77,14 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
                     if File.rename_file(target, aside) {
                         echo("«exe» is in use: moved to bin/old_exes/«File.file_name(aside)», where it runs on")
                     } else if absent or os_error {
-                        fail: failed = "«exe» is in use, and can't be moved aside either"
+                        fail: failed = "«exe» is in use, and can't be moved aside either: the new one is bin/old_exes/new_«exe»"
                     }
             }
         }
-        if code, output, errors := System.run(compiler, File.join_path(here, source), "-os:«os»", "-out:«target»") {
-            if code != 0 then fail: failed = "«source» didn't build:\n«output»«errors»"
-            // What a build through LLVM leaves beside it (its IR, object, and
-            // clang's messages): not buckram's.
-            for leftover: [] string⟨".ll", ".o", ".llvm.txt"⟩ {
-                if File.delete_file("«target»«leftover»") is absent or os_error { }
-            }
-            echo("built bin/«exe»")
-        } else if absent {
-            fail: failed = "there's no compiler '«compiler»': give its path, build.exe C:/rain/build/rain.exe"
-        } else if os_error {
-            fail: failed = "the compiler couldn't be run («os_error»)"
+        if File.rename_file(built, target) is absent or os_error {
+            fail: failed = "bin/old_exes/new_«exe» can't be moved to bin/«exe»: move it by hand"
         }
+        echo("built bin/«exe»")
     }
 }
 

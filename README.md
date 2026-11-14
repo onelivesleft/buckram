@@ -32,7 +32,8 @@ runs as it is downloaded: nothing needs building first.
   `commit`, `fetch`), the working tree is saved as a commit, untracked
   files too (not ignored ones), through a copy of the index, so neither the
   working tree nor the index changes. It's kept as
-  `refs/buckram/saved/<when>`, and the result begins with it: `git restore
+  `refs/buckram/saved/<when>`, for 30 days (older ones go as a new one is
+  saved), and the result begins with it: `git restore
   --source=<commit> -- <path>` brings a file back. A command that makes a
   loss permanent (`reflog expire` or `delete`, `gc --prune`, `prune`, a
   forced push, a deleted remote branch) runs only with `"permanent":
@@ -95,7 +96,9 @@ each: `"run": {"windows": ["cmd", "/c", ".\\build.bat"], "linux":
 isn't one of its tools there (the `task` tool names it, and which systems
 it's for), so a project's folder shared between systems offers each its
 own. `add_task` writes this system's command into a task that has one
-for each, keeping the other's, and otherwise the one command;
+for each, keeping the other's, and so into any task of a file whose tasks
+give one for each (a task's one command then stays the other system's);
+in any other file, the one command;
 `remove_task` takes this system's out of a task that has one for each,
 and otherwise the whole task. Its `arguments` is `"none"` (the default) or
 `"list"`, for a tool that takes a list of strings to add after them. Its

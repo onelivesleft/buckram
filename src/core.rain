@@ -382,7 +382,7 @@ list_tools :: (out: *[..] u8) {
         tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default; it ends what the program started too). Gives its exit code, output and errors. Not git: that's the git tool's.",
              #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"timeout":{"type":"number"}},"required":["program"]}"#)
         append(out, ",")
-        tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/*). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
+        tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/* for 30 days). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
              #"{"type":"object","properties":{"operation":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"},"folder":{"type":"string"},"permanent":{"type":"boolean"}},"required":["operation"]}"#)
         append(out, ",")
         tool(out, "edit", #"Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text ("") that doesn't exist is made with new as its contents. Paths are the project's."#,
@@ -405,7 +405,7 @@ list_tools :: (out: *[..] u8) {
         tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now, for «THIS_SYSTEM»: «string'names».«others»",
              #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}},"required":["name"]}"#)
         append(out, ",")
-        tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. A task that has a command for each system («THIS_SYSTEM» and «OTHER_SYSTEM») gets this one's, the other's kept; any other is one command for every system. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
+        tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. A task that has a command for each system («THIS_SYSTEM» and «OTHER_SYSTEM») gets this one's, the other's kept; so does any task when the file's tasks give a command for each, as a folder more than one system shares does (its one command stays the other's); in any other file it's one command for every system. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
              #"{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"run":«ARGUMENTS_SCHEMA»,"arguments":{"type":"string","enum":["none","list"]},"timeout":{"type":"number"}},"required":["name","run"]}"#)
         append(out, ",")
         tool(out, "remove_task", "Takes a task out of the project's buckram.json: from a task with a command for each system, only this one's («THIS_SYSTEM»'s), and the task once it has none.",
@@ -787,9 +787,22 @@ add_task_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
         *tasks := Json.Json_Object⟨⟩
         if listed := Json.member(file, "tasks") is not absent { tasks = as_object(listed) }
         // Its run: this system's command, in a task with one for each (the
-        // other's kept); or else its one command.
+        // other's kept), or in any task of a file whose tasks give one for
+        // each (a folder more than one system shares, where a command tried
+        // here may not run there); or else its one command, every system's.
+        *shared := false
+        for value: tasks.values {
+            if old := Json.member(value, "run") is not absent {
+                if old is object then shared = true
+            }
+        }
+        this_only := Json.Json_Value.object(with_member(Json.Json_Object⟨⟩, THIS_SYSTEM, Json.Json_Value.list(pieces), false))
         *run_value := Json.Json_Value.list(pieces)
         *how := "added to «CONFIG_FILE»"
+        if shared {
+            run_value = this_only
+            how = "added to «CONFIG_FILE» for «THIS_SYSTEM» (its tasks give a command for each system)"
+        }
         if existing := Json.member(Json.Json_Value.object(tasks), name) is not absent {
             how = "replaced in «CONFIG_FILE»"
             if old_run := Json.member(existing, "run") is not absent {
@@ -797,6 +810,12 @@ add_task_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
                     run_value = Json.Json_Value.object(with_member(object, THIS_SYSTEM, Json.Json_Value.list(pieces), false))
                     how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM»"
                     for system: object.names { if system == OTHER_SYSTEM then how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM» («OTHER_SYSTEM» keeps its own command)" }
+                } else if shared {
+                    // Its one command stays the other system's.
+                    run_value = Json.Json_Value.object(with_member(as_object(this_only), OTHER_SYSTEM, old_run, false))
+                    how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM» («OTHER_SYSTEM» keeps the command it had)"
+                } else {
+                    run_value = Json.Json_Value.list(pieces)
                 }
             }
         }
@@ -1016,7 +1035,7 @@ save_working_tree :: (folder: string, operation: string -> commit: string) [fail
     if tree.failed then fail: failed = tree.text
     *made: Git_Output = ⟨⟩
     message := "buckram: the working tree before git «operation»"
-    head := git_output(folder, "rev-parse", "--verify", "--quiet", "HEAD")
+    head := `scratch git_output(folder, "rev-parse", "--verify", "--quiet", "HEAD")
     if head.failed or String.trim(head.text).count == 0 {
         made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", String.trim(tree.text), "-m", message)
     } else {
@@ -1028,6 +1047,32 @@ save_working_tree :: (folder: string, operation: string -> commit: string) [fail
     when := "«t.year»«t.month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»«t.day_of_month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»-«t.hour, ⟨width: 2, pad: "0"⟩»«t.minute, ⟨width: 2, pad: "0"⟩»«t.second, ⟨width: 2, pad: "0"⟩»-«t.millisecond, ⟨width: 3, pad: "0"⟩»"
     kept := git_output(folder, "update-ref", "refs/buckram/saved/«when»", commit)
     if kept.failed then fail: failed = kept.text
+    prune_saved(folder)
+}
+
+// How long a saved working tree is kept: each is a commit that holds every
+// file it saved, for as long as its ref lasts, and a loss a month old is
+// past wanting back.
+SAVED_DAYS :: 30
+
+// The saved working trees from before SAVED_DAYS ago, their refs deleted.
+// A ref's name is when it was saved (20261113-014057-649), so it's by name.
+prune_saved :: (folder: string) {
+    `scratch {
+        listed := git_output(folder, "for-each-ref", "--format=%(refname:lstrip=3)", "refs/buckram/saved/")
+        if listed.failed then return
+        t := Time.to_calendar(Time.current_time_consensus() - Time.seconds_to_apollo(SAVED_DAYS * 24 * 60 * 60), .LOCAL)
+        cutoff := "«t.year»«t.month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»«t.day_of_month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»"
+        for line: listed.text.split("\n") {
+            name := String.trim(line)
+            if name.count < 8 then continue
+            *digits := true
+            for c: name[:8] { if c < "0" or c > "9" then digits = false }
+            if !digits or name[:8] >= cutoff then continue
+            deleted := git_output(folder, "update-ref", "-d", "refs/buckram/saved/«name»")
+            if deleted.failed { }
+        }
+    }
 }
 
 // What a git command printed, and whether it failed (its text then saying

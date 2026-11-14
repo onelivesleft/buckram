@@ -30,8 +30,8 @@ do; in short:
   commit's message as `message`, exactly as it should be: it goes to git
   as its input. Before a command that can lose uncommitted work, buckram
   saves the working tree (untracked files too, not ignored ones) as a
-  commit, `refs/buckram/saved/<when>`, without touching it or the index,
-  and the result begins with its hash: `git restore --source=<hash> --
+  commit, `refs/buckram/saved/<when>` (kept 30 days), without touching it
+  or the index, and the result begins with its hash: `git restore --source=<hash> --
   <path>` brings a file back. A command that makes a loss permanent
   (`reflog expire`/`delete`, `gc --prune`, `prune`, a forced push or a
   deleted remote branch) runs only with `"permanent": true`: ask the
@@ -92,7 +92,9 @@ A tool's result is an error when its program exits with a code other than
    path is the project's): one command for every system, or one for each,
    `"run": {"windows": [...], "linux": [...]}`, for a project whose
    folder more than one system uses (a task with none for this system
-   isn't offered here; `task`'s description names it); `arguments` is `"none"` or `"list"` (more
+   isn't offered here; `task`'s description names it; there, `add_task`
+   writes a new task's command for this system only, as one that works
+   here may not run there); `arguments` is `"none"` or `"list"` (more
    arguments added after its own); `timeout` is in seconds (600 by
    default; a call can give its own). Say in each
    description what it gives back and what arguments it takes, since
