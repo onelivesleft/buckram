@@ -90,6 +90,5 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
 
 // The name one moved aside gets: buckram_core_2.exe, or buckram_2.
 aside_name :: (exe: string, n: i64 -> string) {
-    if File.extension(exe) == "" then return "«exe»_«n»"
-    return "«File.without_extension(exe)»_«n».«File.extension(exe)»"
+    return if File.extension(exe) == "" then "«exe»_«n»" else "«File.without_extension(exe)»_«n».«File.extension(exe)»"
 }

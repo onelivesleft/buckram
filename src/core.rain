@@ -611,14 +611,13 @@ wrong_type :: (value: Json.Json_Value, type: string -> string) {
 
 // edit's, or processes'.
 possessive :: (name: string -> string) {
-    if String.ends_with(name, "s") then return "«name»'"
-    return "«name»'s"
+    return if String.ends_with(name, "s") then "«name»'" else "«name»'s"
 }
 
 // A JSON value in words: the number 5, the text "x", true, a list.
 described :: (value: Json.Json_Value -> string) {
     if value is none then return "null"
-    if value is boolean { if boolean then return "true" else return "false" }
+    if value is boolean { return if boolean then "true" else "false" }
     if value is number then return "the number «number»"
     if value is text then return #"the text "«text»""#
     if value is list then return "a list"
@@ -628,8 +627,7 @@ described :: (value: Json.Json_Value -> string) {
 // Seconds as text, with the unit: 600 seconds, 1 second, or 0.5 seconds.
 seconds_text :: (seconds: f64 -> string) {
     whole := i64'seconds
-    if f64'whole == seconds then return "«whole» second«plural(whole)»"
-    return "«seconds» seconds"
+    return if f64'whole == seconds then "«whole» second«plural(whole)»" else "«seconds» seconds"
 }
 
 // A number of seconds: given as a number, or a string of one (as agents
@@ -1340,8 +1338,7 @@ limited :: (tool_name: string, text: string -> string) {
 
 // "s" after a count other than 1.
 plural :: (n: i64 -> string) {
-    if n == 1 then return ""
-    return "s"
+    return if n == 1 then "" else "s"
 }
 
 // The first line of the text that isn't blank, trimmed, and cut (at a

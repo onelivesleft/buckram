@@ -140,8 +140,7 @@ copy_or_move :: (out: *[..] u8, arguments: Json.Json_Value, moving: bool) {
 
 // What a result adds when the file there was moved aside.
 set_aside_note :: (aside: string -> string) #pure {
-    if aside == "" then return ""
-    return " (what was there was in use, so it was moved to «aside» first, where it runs on)"
+    return if aside == "" then "" else " (what was there was in use, so it was moved to «aside» first, where it runs on)"
 }
 
 //- a file in use
@@ -224,8 +223,7 @@ set_aside :: (path: string -> aside: string) {
 
 // The name one moved aside gets: hud_2.exe, or buckram_2.
 aside_name :: (name: string, n: i64 -> string) {
-    if File.extension(name) == "" then return "«name»_«n»"
-    return "«File.without_extension(name)»_«n».«File.extension(name)»"
+    return if File.extension(name) == "" then "«name»_«n»" else "«File.without_extension(name)»_«n».«File.extension(name)»"
 }
 
 // A file moved aside put back where it was, when what was to replace it
@@ -469,6 +467,5 @@ named_like :: (exe_name: string, name: string -> bool) {
 
 // "es" after a count other than 1.
 plural_es :: (n: i64 -> string) {
-    if n == 1 then return ""
-    return "es"
+    return if n == 1 then "" else "es"
 }
