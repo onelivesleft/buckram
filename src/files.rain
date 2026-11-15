@@ -427,7 +427,7 @@ processes_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
         *failed := false
         for p: running {
             id := i64'(p.id)
-            *picked := name != "" and String.equal(p.name, name, .IGNORING_CASE)
+            *picked := name != "" and p.name.equals(name, .IGNORING_CASE)
             for wanted: ids { if wanted == id then picked = true }
             if !picked then continue
             *runs_buckram := false
