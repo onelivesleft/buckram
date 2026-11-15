@@ -45,11 +45,18 @@ runs as it is downloaded: nothing needs building first.
   and its name; `all` for everything beneath it), copy or move a file or a
   whole folder, and delete files and folders, read-only ones included (as
   Perforce leaves them). It won't delete or move away the project's folder,
-  one holding it, or a drive.
+  one holding it, or a drive. A file a copy or move would replace that's
+  in use (a running program, which can't be replaced but can be renamed)
+  is moved into `old_exes` beside it first, where it runs on, and put back
+  if the copy still fails; those there no longer in use are cleared out
+  the next time.
 - **processes**: list the running processes (those whose program's name
   contains `name`), or end them by program name or ID. buckram, and what
   started it (the agent's own client), are never ended.
 - **the project's tasks**, from its `buckram.json` (below): each a tool.
+  It runs in the project's folder, or in `folder` (a git worktree, say),
+  where a program the task gives as a path (`build/tests.exe`) is that
+  folder's: so a worktree's `build` and `test` are its own.
 - **task**: runs a task by name, for one added since the client last
   listed the tools.
 - **add_task** and **remove_task**: change the project's tasks, for one
@@ -60,8 +67,16 @@ Each call is logged, a JSON object a line, in
 `output_folder/calls.<machine>.jsonl` (the machine and its system,
 `dolly-windows` say, as two can share a project's folder: a VM's shared
 folder, or WSL): when, the tool and its arguments, how long it took,
-whether it was an error, and how big its result was. It shows which jobs
+whether it was an error, and how big its result was. An error's line says
+why (`"why"`): a program's exit code, or its timeout, and the first line
+of its errors (or of its output, if it wrote none to standard error), or
+the first line of buckram's own answer, a refusal say. It shows which jobs
 an agent does often enough to be a task, or a tool of buckram's own.
+[tools/calls.rain](tools/calls.rain) sums it up: `rain -run
+c:/repos/buckram/tools/calls.rain [logs or folders] [-since:2026-11-14]`
+(`build/buckram` by default) gives the calls and errors of each tool, each
+program and each day, the commands made most often, what the errors said,
+the slowest calls and the latest errors.
 
 A tool refuses a parameter it doesn't have, naming those it has, and one
 of the wrong type (a number in `arguments`, `"true"` for `permanent`, a

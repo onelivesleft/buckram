@@ -1,7 +1,10 @@
 # bin/'s exes are committed, so buckram runs without building it. Not
 # committed: build.exe (built from build.rain), the exes build.exe moved
-# aside while they ran, and scratch.
+# aside while they ran, what rain -run makes of tools/ (run, not built),
+# and scratch.
 /*.exe
+tools/*.exe
+*.rdi
 bin/old_exes/
 *.obj
 *.pdb

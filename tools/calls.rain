@@ -1,0 +1,287 @@
+// Sums up buckram's call logs (output_folder/calls.<machine>.jsonl, a line a
+// call): the calls and errors of each tool, of run's programs and git's
+// operations, and of each day; the commands made most often; what the
+// errors said; the slowest calls; the latest errors; and the quick ones
+// (refused, mostly, before anything ran) with edit's.
+//
+//     rain -run c:/repos/buckram/tools/calls.rain [paths] [-since:2026-11-14]
+//
+// A path is a log, or a folder whose calls.*.jsonl are read (build/buckram,
+// in the project's folder, by default). -since: leaves out calls before
+// then (a time as the log writes them, or the start of one: a day, say).
+
+#import Console
+#import File
+#import Json
+#import String
+#import Table
+#import Array
+
+Stat :: struct {
+    name: string
+    count: i64
+    errors: i64
+    quick_errors: i64     // errors in under QUICK_MS: refused, mostly, before anything ran
+    ms: i64
+    max_ms: i64
+}
+
+Call :: struct {
+    time: string
+    tool: string
+    what: string
+    why: string
+    ms: i64
+    bytes: i64
+}
+
+Totals :: struct {
+    since: string
+    tools: Table(string, Stat)
+    programs: Table(string, Stat)     // run's programs, git's and files' operations
+    days: Table(string, Stat)
+    commands: Table(string, Stat)     // whole commands
+    said: Table(string, Stat)         // what the errors said (a log from before 2026-11-15 doesn't say)
+    slow: [..] Call                   // those of SLOW_MS or more
+    failed: [..] Call
+    quick: [..] Call                  // errors in under QUICK_MS, and edit's
+    calls: i64
+    left_out: i64                     // before since
+    unreadable: i64
+    first: string
+    last: string
+}
+
+SLOW_MS :: 30_000
+QUICK_MS :: 5
+LATEST :: 40
+MOST :: 30
+
+text_of :: (value: Json.Json_Value, name: string -> string) {
+    if v := Json.member(value, name) {
+        if v is text then return text
+    } else if absent { }
+    return ""
+}
+
+number_of :: (value: Json.Json_Value, name: string -> i64) {
+    if v := Json.member(value, name) {
+        if v is number {
+            if n := String.to_i64(number) { return n } else if invalid or too_big { }
+        }
+    } else if absent { }
+    return 0
+}
+
+bool_of :: (value: Json.Json_Value, name: string -> bool) {
+    if v := Json.member(value, name) {
+        if v is boolean then return boolean
+    } else if absent { }
+    return false
+}
+
+// The texts of a list member, each a word of out.
+words_of :: (value: Json.Json_Value, name: string, out: *[..] u8) {
+    if v := Json.member(value, name) {
+        if v is list {
+            for item: list {
+                if item is text then add_word(out, text)
+            }
+        }
+    } else if absent { }
+}
+
+add_word :: (out: *[..] u8, word: string) {
+    if word.count == 0 then return
+    if out.count > 0 then out.append(" ")
+    out.append(word)
+}
+
+// One more call under the key (copied into the global arena the first time).
+record :: (table: *Table(string, Stat), key: string, ms: i64, failed: bool) {
+    if !table.contains(key) {
+        kept := `global String.copy(key)
+        `global table.set(kept, ⟨name: kept⟩)
+    }
+    if s := table.place(key) {
+        s.count += 1
+        if failed {
+            s.errors += 1
+            if ms < QUICK_MS then s.quick_errors += 1
+        }
+        s.ms += ms
+        if ms > s.max_ms then s.max_ms = ms
+    } else if absent { }
+}
+
+keep :: (list: *[..] Call, call: Call) {
+    kept := Call⟨time: `global String.copy(call.time), tool: `global String.copy(call.tool), what: `global String.copy(call.what), why: `global String.copy(call.why), ms: call.ms, bytes: call.bytes⟩
+    `global list.add(kept)
+}
+
+// A line of a log, read and added up.
+take :: (line: string, totals: *Totals) {
+    scratch.rewind_at_end()
+    *call: Call
+    *program := ""
+    *failed := false
+    `scratch {
+        if value := Json.parse_json(line) {
+            call.tool = text_of(value, "tool")
+            call.time = text_of(value, "time")
+            call.why = text_of(value, "why")
+            call.ms = number_of(value, "ms")
+            call.bytes = number_of(value, "bytes")
+            failed = bool_of(value, "error")
+            if arguments := Json.member(value, "arguments") {
+                // What was called: run's program, or an operation, then the
+                // arguments, the paths, and edit's files.
+                *words: [..] u8
+                program = text_of(arguments, "program")
+                if program.count == 0 then program = text_of(arguments, "operation")
+                if program.count == 0 and call.tool == "task" then program = text_of(arguments, "name")
+                add_word(words, program)
+                words_of(arguments, "arguments", words)
+                add_word(words, text_of(arguments, "path"))
+                add_word(words, text_of(arguments, "from"))
+                add_word(words, text_of(arguments, "to"))
+                words_of(arguments, "paths", words)
+                if edits := Json.member(arguments, "edits") {
+                    if edits is list {
+                        add_word(words, "«list.count» edits:")
+                        for e: list {
+                            file := text_of(e, "file")
+                            add_word(words, file.file_name())
+                        }
+                    }
+                } else if absent { }
+                folder := text_of(arguments, "folder")
+                if folder.count > 0 then add_word(words, "(in «folder»)")
+                call.what = string'words
+            } else if absent { }
+        } else if bad_json {
+            totals.unreadable += 1
+            return
+        }
+    }
+    if call.time < totals.since {
+        totals.left_out += 1
+        return
+    }
+    totals.calls += 1
+    if totals.first.count == 0 or call.time < totals.first then totals.first = `global String.copy(call.time)
+    if call.time > totals.last then totals.last = `global String.copy(call.time)
+    record(totals.tools, call.tool, call.ms, failed)
+    if program.count > 0 then record(totals.programs, "«call.tool» «program»", call.ms, failed)
+    if call.time.count >= 10 then record(totals.days, call.time[:10], call.ms, failed)
+    record(totals.commands, "«call.tool»: «call.what»", call.ms, failed)
+    if failed and call.why.count > 0 then record(totals.said, "«call.tool»: «call.why»", call.ms, failed)
+    if call.ms >= SLOW_MS then keep(totals.slow, call)
+    if failed then keep(totals.failed, call)
+    if failed and (call.ms < QUICK_MS or call.tool == "edit") then keep(totals.quick, call)
+}
+
+more_calls :: (a: Stat, b: Stat -> bool) { return a.count > b.count }
+slower :: (a: Call, b: Call -> bool) { return a.ms > b.ms }
+earlier :: (a: Call, b: Call -> bool) { return a.time < b.time }
+
+// The text, cut past most bytes (at a character's start).
+clip :: (text: string, most: i64 -> string) #pure {
+    if text.count <= most { return text }
+    *end := most
+    while end > 0 and (text[end] & 0xC0) == 0x80 { end -= 1 }
+    return text[:end]
+}
+
+show :: (title: string, table: *Table(string, Stat), most: i64, by_calls: bool) {
+    scratch.rewind_at_end()
+    *rows: [..] Stat
+    for s: table { `scratch rows.add(s) }
+    if by_calls then rows.sort_by(more_calls)
+    echo("")
+    echo("«title» («table.count»)")
+    echo("   calls errors   %  quick   total s   avg ms    max ms  name")
+    *shown := 0
+    for s: rows {
+        if shown == most then break
+        shown += 1
+        rate := if s.count > 0 then s.errors * 100 / s.count else 0
+        avg := if s.count > 0 then s.ms / s.count else 0
+        echo("  «s.count, ⟨width: 6⟩» «s.errors, ⟨width: 6⟩» «rate, ⟨width: 3⟩» «s.quick_errors, ⟨width: 6⟩» «f64'(s.ms) / 1000.0, ⟨precision: 1, width: 9⟩» «avg, ⟨width: 8⟩» «s.max_ms, ⟨width: 9⟩»  «clip(s.name, 110)»")
+    }
+}
+
+show_calls :: (title: string, calls: [] Call) {
+    echo("")
+    echo("«title» («calls.count»)")
+    for c: calls {
+        echo("  «c.time»  «f64'(c.ms) / 1000.0, ⟨precision: 1, width: 7⟩»s  «c.bytes, ⟨width: 7⟩»B  «c.tool»: «clip(c.what, 110)»")
+        if c.why.count > 0 then echo("      «clip(c.why, 150)»")
+    }
+}
+
+// The logs a path names: itself, or a folder's calls.*.jsonl.
+add_logs :: (path: string, logs: *[..] string) {
+    scratch.rewind_at_end()
+    if File.folder_exists(path) {
+        `scratch {
+            if entries := File.files_in(path) is not absent or os_error {
+                for entry: entries {
+                    if !entry.is_folder and entry.name.starts_with("calls.") and entry.name.ends_with(".jsonl") {
+                        `global logs.add(`global String.copy(entry.path))
+                    }
+                }
+            }
+        }
+        return
+    }
+    `global logs.add(`global String.copy(path))
+}
+
+main :: (args: [] string) [usage: string] {
+    *totals: Totals
+    *logs: [..] string
+    for arg: args[1:] {
+        if arg.starts_with("-since:") {
+            totals.since = arg["-since:".count:]
+        } else if arg.starts_with("-") {
+            fail: usage = "calls.rain takes logs, or folders of them, and -since:<time>, not «arg»"
+        } else {
+            add_logs(arg, logs)
+        }
+    }
+    if logs.count == 0 then add_logs("build/buckram", logs)
+    if logs.count == 0 { fail: usage = "there are no logs in build/buckram: give a log, or a folder of them" }
+    *texts: [..] string
+    for path: logs {
+        if text := File.read_file(path) {
+            texts.add(text)
+        } else if absent or os_error {
+            echo("can't read «path»")
+        }
+    }
+    for text, i: texts {
+        before := totals.calls
+        for line: text.split("\n") {
+            if line.count > 0 then take(line, totals)
+        }
+        echo("«logs[i]»: «totals.calls - before» calls")
+    }
+    *since := ""
+    if totals.since.count > 0 then since = " (since «totals.since»; «totals.left_out» before)"
+    echo("«totals.calls» calls, «totals.first» to «totals.last»«since»; «totals.unreadable» lines unreadable")
+    show("By tool", totals.tools, 100, true)
+    show("By program or operation", totals.programs, MOST, true)
+    show("By day (UTC)", totals.days, 100, false)
+    show("Commands made most often", totals.commands, MOST, true)
+    show("What the errors said", totals.said, MOST, true)
+    totals.slow.sort_by(slower)
+    slowest := if totals.slow.count > 15 then 15 else totals.slow.count
+    show_calls("Slowest calls", totals.slow[:slowest])
+    // In time order, as several logs may be read.
+    totals.failed.sort_by(earlier)
+    start := if totals.failed.count > LATEST then totals.failed.count - LATEST else 0
+    show_calls("Latest errors", totals.failed[start:])
+    totals.quick.sort_by(earlier)
+    show_calls("Quick errors, and edit's", totals.quick)
+}

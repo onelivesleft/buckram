@@ -12,7 +12,10 @@ The server's instructions and each tool's description say what the tools
 do; in short:
 
 - **Prefer a task.** The project's `buckram.json` declares its build,
-  test and other commands as tools of their own. Use those first.
+  test and other commands as tools of their own. Use those first. In a
+  git worktree, give the task its `folder`: a program the task gives as a
+  path (`build/tests.exe`) is then the worktree's, so `build` and `test`
+  build and test the worktree's own, rather than `run` with its paths.
 - **Add a task for anything you'll run again.** `add_task` writes it into
   `buckram.json` (laid out to read, so it shows in `git diff`), and buckram
   tells the client its tools have changed: in Claude Code the task is a
@@ -43,7 +46,10 @@ do; in short:
   a program written for it: `operation` `list` (`path`, `all`), `copy` or
   `move` (`from`, `to`: a file or a whole folder), `delete` (`paths`; a
   folder goes with everything in it, read-only files too). It refuses the
-  project's folder, one holding it, and drives.
+  project's folder, one holding it, and drives. A copy or move onto a
+  file in use (a running program) moves that into `old_exes` beside it
+  first, where it runs on, and says so: installing a program that's
+  running needs nothing more.
 - **`processes`** to `list` the running processes (`name` filters them)
   or `end` some (`name`, a program such as `rain.exe`, or `ids`); never
   buckram or what started it.
@@ -63,9 +69,13 @@ A tool's result is an error when its program exits with a code other than
 - **The call log:** every call is a line of
   `output_folder/calls.<machine>.jsonl`, the machine and its system
   (`dolly-windows`), so machines sharing a folder keep apart
-  (`{"time", "tool", "arguments", "ms", "error", "bytes"}`). Read it now and
-  then for what repeats (the same `run`, a chain of calls that's one job)
-  and propose a task, or a tool of buckram's own, for it.
+  (`{"time", "tool", "arguments", "ms", "error", "bytes"}`, and for an
+  error `"why"`: the exit code or timeout and the first line it wrote, or
+  buckram's refusal). Read it now and then, through `rain -run
+  c:/repos/buckram/tools/calls.rain` in the project's folder (`-since:` a
+  day for the latest), for what repeats (the same `run`, a chain of calls
+  that's one job) and what fails, and propose a task, or a tool of
+  buckram's own, for it.
 
 ## Setting it up in a project
 
@@ -139,6 +149,8 @@ A tool's result is an error when its program exits with a code other than
   answers `initialize`, and for every other message starts
   `bin/buckram_core.exe` afresh in the project's folder with the message as
   its standard input. [src/core.rain](src/core.rain) has the tools.
+  [tools/calls.rain](tools/calls.rain) sums up the call logs (run with
+  `rain -run`, not built).
   [build.rain](build.rain) builds both into `bin/`, for Windows and for
   Linux, and those programs are committed, so buckram is used as it's
   downloaded. Code that differs by system is in `#if #OS`, or better, in

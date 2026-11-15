@@ -37,8 +37,11 @@
 // output_folder/calls.<machine>.jsonl (dolly-windows: the machine and its
 // system, as two may share the project's folder):
 // when, the tool, its arguments, how long it took, whether it was an
-// error, and how big its result was. Read, it shows which jobs come up
-// often enough to be a task, or a tool of buckram's own.
+// error (and if so why: a program's exit code, or its timeout, and the
+// first line of its errors, or of its output if it wrote none; otherwise
+// the first line of buckram's result, a refusal say), and how big its
+// result was. Read, it shows which jobs come up often enough to be a
+// task, or a tool of buckram's own (tools/calls.rain sums it up).
 //
 // The project's buckram.json:
 //
@@ -59,7 +62,9 @@
 // A task's "arguments" is "none" (the default) or "list": then the tool
 // takes a list of strings, added after its run. Its timeout is in seconds
 // (600 by default), and a call can give its own. A timeout ends what the
-// program started too.
+// program started too. A call can give a folder to run it in (a worktree,
+// say), the project's by default: a program given as a path is that
+// folder's, so the task is the worktree's own.
 //
 // Every tool refuses a parameter it hasn't (naming those it has), or one
 // of the wrong type (saying what to give), rather than dropping it or
@@ -74,7 +79,7 @@
 
 #include "files.rain"
 
-VERSION :: "0.2.0"
+VERSION :: "0.4.0"
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
 DEFAULT_TIMEOUT : f64 : 600
 // git's commands that only look, or only add to what's kept (add, commit,
@@ -119,6 +124,10 @@ Elsewhere :: struct {
 }
 
 config: Config
+// Why the call's result is an error, for its line in the log ("" if it
+// isn't one): set by tool_result, and by run_program for a program's.
+why_failed: string
+WHY_LIMIT :: 240                      // bytes of it kept
 
 // One message, from its input; the answer (if it needs one) to its output.
 main :: () {
@@ -375,6 +384,7 @@ respond_error :: (id: Json.Json_Value, code: i64, message: string) {
 //- the tools
 
 ARGUMENTS_SCHEMA :: #"{"type":"array","items":{"type":"string"}}"#
+FOLDER_NOTE :: "It runs in the project's folder, or in folder (a worktree, say: a program the task gives as a path is then that folder's)."
 
 list_tools :: (out: *[..] u8) {
     `scratch {
@@ -402,8 +412,8 @@ list_tools :: (out: *[..] u8) {
         if names.count == 0 then append(names, "none yet")
         *others := ""
         if config.elsewhere.count > 0 then others = " Tasks with commands only for other systems, so not here: «elsewhere_names()»."
-        tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now, for «THIS_SYSTEM»: «string'names».«others»",
-             #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}},"required":["name"]}"#)
+        tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, a folder to run it in (a worktree, say: its programs given as paths are then that folder's), and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now, for «THIS_SYSTEM»: «string'names».«others»",
+             #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"timeout":{"type":"number"}},"required":["name"]}"#)
         append(out, ",")
         tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none" or "list"), and a timeout in seconds. A task that has a command for each system («THIS_SYSTEM» and «OTHER_SYSTEM») gets this one's, the other's kept; so does any task when the file's tasks give a command for each, as a folder more than one system shares does (its one command stays the other's); in any other file it's one command for every system. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
              #"{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"run":«ARGUMENTS_SCHEMA»,"arguments":{"type":"string","enum":["none","list"]},"timeout":{"type":"number"}},"required":["name","run"]}"#)
@@ -415,10 +425,10 @@ list_tools :: (out: *[..] u8) {
             *description := task.description
             if description == "" then description = "Runs the project's task '«task.name»'."
             if task.takes == .LIST {
-                tool(out, task.name, "«description» Arguments given as a list are added after its own. It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.",
-                     #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»,"timeout":{"type":"number"}}}"#)
+                tool(out, task.name, "«description» Arguments given as a list are added after its own. «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.",
+                     #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"timeout":{"type":"number"}}}"#)
             } else {
-                tool(out, task.name, "«description» It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.", #"{"type":"object","properties":{"timeout":{"type":"number"}}}"#)
+                tool(out, task.name, "«description» «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.", #"{"type":"object","properties":{"folder":{"type":"string"},"timeout":{"type":"number"}}}"#)
             }
         }
         append(out, "]}")
@@ -459,7 +469,13 @@ record_call :: (name: string, arguments: Json.Json_Value, took: Time.Apollo_Time
         Json.write_json_text(line, name)
         append(line, #","arguments":"#)
         Json.write_json(line, arguments)
-        append(line, #","ms":«ms»,"error":«String.ends_with(result, ERROR_RESULT_END)»,"bytes":«result.count»}"#, "\n")
+        failed := String.ends_with(result, ERROR_RESULT_END)
+        append(line, #","ms":«ms»,"error":«failed»,"bytes":«result.count»"#)
+        if failed and why_failed != "" {
+            append(line, #","why":"#)
+            Json.write_json_text(line, why_failed)
+        }
+        append(line, "}\n")
         if File.append_file(File.join_path(folder, "calls.«config.machine».jsonl"), string'line) is absent or os_error { }
     }
 }
@@ -475,7 +491,7 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json.Json_Value) {
     if name == "add_task" { if takes_only(out, name, arguments, "name:text description:text run:texts arguments:text timeout:seconds") then add_task_tool(out, arguments); return }
     if name == "remove_task" { if takes_only(out, name, arguments, "name:text") then remove_task_tool(out, arguments); return }
     if name == "task" {
-        if !takes_only(out, name, arguments, "name:text arguments:texts timeout:seconds") then return
+        if !takes_only(out, name, arguments, "name:text arguments:texts folder:text timeout:seconds") then return
         wanted := text_member(arguments, "name")
         for task: config.tasks {
             if task.name == wanted {
@@ -488,8 +504,8 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json.Json_Value) {
     }
     for task: config.tasks {
         if task.name == name {
-            *parameters := "timeout:seconds"
-            if task.takes == .LIST then parameters = "arguments:texts timeout:seconds"
+            *parameters := "folder:text timeout:seconds"
+            if task.takes == .LIST then parameters = "arguments:texts folder:text timeout:seconds"
             if takes_only(out, name, arguments, parameters) then run_task(out, task, arguments)
             return
         }
@@ -649,9 +665,19 @@ run_task :: (out: *[..] u8, task: Task, arguments: Json.Json_Value) {
     if task.takes == .LIST {
         for extra: texts_member(arguments, "arguments") { command.add(extra) }
     }
-    // A program given as a path (build/rain.exe) is the project's.
+    // Its folder: the project's, or the one given (a worktree), whose
+    // program a path gives (build/rain.exe) is.
+    *folder := config.folder
+    given := text_member(arguments, "folder")
+    if given != "" {
+        folder = in_project(given)
+        if !File.folder_exists(folder) {
+            tool_result(out, "there's no folder «given» to run «task.name» in", true)
+            return
+        }
+    }
     *program := task.command[0]
-    if String.contains_any(program, "/\\") then program = in_project(program)
+    if String.contains_any(program, "/\\") and !is_whole(program) then program = File.join_path(folder, program)
     // Its timeout, or the call's.
     *timeout := task.timeout
     if seconds := seconds_member(arguments, "timeout", task.timeout) {
@@ -660,7 +686,7 @@ run_task :: (out: *[..] u8, task: Task, arguments: Json.Json_Value) {
         tool_result(out, bad_seconds, true)
         return
     }
-    run_program(out, task.name, ⟨folder: config.folder, timeout: timeout⟩, program, command)
+    run_program(out, task.name, ⟨folder: folder, timeout: timeout⟩, program, command)
 }
 
 //- Changing the tasks
@@ -1264,6 +1290,13 @@ run_program :: (out: *[..] u8, tool_name: string, options: System.Run_Options, p
             append(text, "--- errors ---\n", errors)
         }
         tool_result(out, limited(tool_name, string'text), timed_out or code != 0)
+        if timed_out or code != 0 {
+            *said := first_line(errors)
+            if said == "" then said = first_line(output)
+            *head := "exit code «code»"
+            if timed_out then head = "timed out after «seconds_text(options.timeout)» seconds"
+            if said == "" { why_failed = `global String.copy(head) } else { why_failed = `global "«head»: «said»" }
+        }
     } else if absent {
         tool_result(out, "there's no program '«program»' (a path, or a name on the PATH)", true)
     } else if os_error {
@@ -1294,7 +1327,24 @@ plural :: (n: i64 -> string) {
     return "s"
 }
 
+// The first line of the text that isn't blank, trimmed, and cut (at a
+// character's start) past WHY_LIMIT bytes; "" if there's none.
+first_line :: (text: string -> string) {
+    for line: text.split("\n") {
+        trimmed := String.trim(line)
+        if trimmed.count == 0 then continue
+        *end := trimmed.count
+        if end > WHY_LIMIT {
+            end = WHY_LIMIT
+            while end > 0 and (trimmed[end] & 0xC0) == 0x80 { end -= 1 }
+        }
+        return trimmed[:end]
+    }
+    return ""
+}
+
 tool_result :: (out: *[..] u8, text: string, is_error: bool) {
+    if is_error then why_failed = `global String.copy(first_line(text))
     append(out, #"{"content":[{"type":"text","text":"#)
     Json.write_json_text(out, text)
     append(out, #"}],"isError":«is_error»}"#)

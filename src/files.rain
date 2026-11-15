@@ -3,8 +3,9 @@
 // 693). A path is the project's, unless it's whole.
 //
 //   files      list a folder (sizes and dates; all of it beneath with all),
-//              copy or move a file or folder, delete files and folders
-//              (clearing read-only first)
+//              copy or move a file or folder (a file there in use moved
+//              aside first), delete files and folders (clearing read-only
+//              first)
 //   processes  list the running processes (named like name), or end them
 //              by name or ID: never buckram, or what started it
 
@@ -106,34 +107,131 @@ copy_or_move :: (out: *[..] u8, arguments: Json.Json_Value, moving: bool) {
         }
         make_folder_for(to)
         if moving {
-            if File.rename_file(from, to) is {
+            if aside := move_over(from, to) is {
                 case absent:
                     tool_result(out, "there's nothing at «from_given» to move", true)
                 case os_error:
                     tool_result(out, "«from_given» can't be moved to «to_given» («os_error»)", true)
             } else {
-                tool_result(out, "moved «from_given» to «to_given»", false)
+                tool_result(out, "moved «from_given» to «to_given»«set_aside_note(aside)»", false)
             }
             return
         }
         if File.folder_exists(from) {
-            if count := copy_folder(from, to) {
-                tool_result(out, "copied «from_given» to «to_given»: «count» file«plural(count)»", false)
+            if count, in_use := copy_folder(from, to) {
+                *note := ""
+                if in_use > 0 then note = " («in_use» there in use, so moved into old_exes beside them first, where they run on)"
+                tool_result(out, "copied «from_given» to «to_given»: «count» file«plural(count)»«note»", false)
             } else if os_error {
                 tool_result(out, "«from_given» can't all be copied to «to_given» («os_error»): what was copied before stays", true)
             }
             return
         }
-        clear_read_only(to)
-        if File.copy_file(from, to) is {
+        if aside := copy_over(from, to) is {
             case absent:
                 tool_result(out, "there's nothing at «from_given» to copy", true)
             case os_error:
                 tool_result(out, "«from_given» can't be copied to «to_given» («os_error»)", true)
         } else {
-            tool_result(out, "copied «from_given» to «to_given»", false)
+            tool_result(out, "copied «from_given» to «to_given»«set_aside_note(aside)»", false)
         }
     }
+}
+
+// What a result adds when the file there was moved aside.
+set_aside_note :: (aside: string -> string) #pure {
+    if aside == "" then return ""
+    return " (what was there was in use, so it was moved to «aside» first, where it runs on)"
+}
+
+//- a file in use
+//
+// A file in use (a running program) can't be replaced, but it can be
+// renamed, on Windows as on Linux: so a copy or a move onto one that fails
+// moves it into old_exes beside it, where it runs on, and tries again; if
+// that fails too, it's put back. Those in old_exes no longer in use are
+// cleared out as another goes there.
+
+// The file copied to to: where what was there went ("" if it stayed).
+copy_over :: (from: string, to: string -> aside: string) [absent, os_error: File.System_Error] {
+    aside = ""
+    clear_read_only(to)
+    if File.copy_file(from, to) is {
+        case absent: fail: absent
+        case os_error:
+            aside = set_aside(to)
+            if aside == "" { fail: os_error = os_error }
+    } else {
+        return
+    }
+    if File.copy_file(from, to) is {
+        case absent:
+            put_back(aside, to)
+            fail: absent
+        case os_error:
+            put_back(aside, to)
+            fail: os_error = os_error
+    }
+}
+
+// The file or folder moved to to: the same.
+move_over :: (from: string, to: string -> aside: string) [absent, os_error: File.System_Error] {
+    aside = ""
+    if File.rename_file(from, to) is {
+        case absent: fail: absent
+        case os_error:
+            aside = set_aside(to)
+            if aside == "" { fail: os_error = os_error }
+    } else {
+        return
+    }
+    if File.rename_file(from, to) is {
+        case absent:
+            put_back(aside, to)
+            fail: absent
+        case os_error:
+            put_back(aside, to)
+            fail: os_error = os_error
+    }
+}
+
+// A file moved into old_exes beside it (hud.exe to old_exes/hud_1.exe), once
+// those there no longer in use are cleared out: where it went, or "" if it
+// isn't a file or couldn't be moved.
+set_aside :: (path: string -> aside: string) {
+    aside = ""
+    if !File.file_exists(path) then return
+    *moved_to := ""
+    `scratch {
+        old := File.join_path(File.folder_of(path), "old_exes")
+        if File.create_folder(old) is os_error then return
+        // Those no longer in use go (one still in use can't be deleted).
+        if entries := File.files_in(old) is not absent or os_error {
+            for entry: entries {
+                if entry.is_folder then continue
+                if File.delete_file(entry.path) is absent or os_error { }
+            }
+        }
+        name := File.file_name(path)
+        *n := 1
+        while File.file_exists(File.join_path(old, aside_name(name, n))) { n += 1 }
+        place := File.join_path(old, aside_name(name, n))
+        if File.rename_file(path, place) is absent or os_error then return
+        moved_to = place
+    }
+    aside = String.copy(moved_to)
+}
+
+// The name one moved aside gets: hud_2.exe, or buckram_2.
+aside_name :: (name: string, n: i64 -> string) {
+    if File.extension(name) == "" then return "«name»_«n»"
+    return "«File.without_extension(name)»_«n».«File.extension(name)»"
+}
+
+// A file moved aside put back where it was, when what was to replace it
+// couldn't.
+put_back :: (aside: string, path: string) {
+    if File.rename_file(aside, path) is absent or os_error { }
 }
 
 // The folders on the way to a path, made if they aren't there.
@@ -145,10 +243,11 @@ make_folder_for :: (path: string) {
 }
 
 // A folder and all beneath it, copied (replacing files of the same name):
-// how many files.
-copy_folder :: (from: string, to: string -> count: i64) [os_error: File.System_Error] {
+// how many files, and how many of those there were in use, so moved aside.
+copy_folder :: (from: string, to: string -> count: i64, in_use: i64) [os_error: File.System_Error] {
     `scratch {
         count = 0
+        in_use = 0
         if File.create_folder(to) is os_error { fail: os_error = os_error }
         if entries := File.all_files(from) {
             for entry: entries {
@@ -156,8 +255,10 @@ copy_folder :: (from: string, to: string -> count: i64) [os_error: File.System_E
                 if entry.is_folder {
                     if File.create_folder(target) is os_error { fail: os_error = os_error }
                 } else {
-                    clear_read_only(target)
-                    if File.copy_file(entry.path, target) { count += 1 } else if absent { } else if os_error { fail: os_error = os_error }
+                    if aside := copy_over(entry.path, target) {
+                        count += 1
+                        if aside != "" then in_use += 1
+                    } else if absent { } else if os_error { fail: os_error = os_error }
                 }
             }
         } else if absent {
