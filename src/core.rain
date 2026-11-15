@@ -115,7 +115,7 @@ Elsewhere :: struct {
 }
 
 // The system a task's run can name, this one and the other.
-#if #OS == .WINDOWS {
+#if #program.os == .WINDOWS {
     THIS_SYSTEM :: "windows"
     OTHER_SYSTEM :: "linux"
 } #else {
@@ -263,7 +263,7 @@ strings_of :: (items: [] Json.Json_Value, into: *[..] string -> bool) {
 machine_name :: (-> string) {
     *host := ""
     `scratch {
-        #if #OS == .WINDOWS {
+        #if #program.os == .WINDOWS {
             if name := System.environment("COMPUTERNAME") { host = name } else if absent or os_error { }
         } #else {
             if name := File.read_file("/proc/sys/kernel/hostname") { host = String.trim(name) } else if absent or os_error { }

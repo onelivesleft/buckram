@@ -333,7 +333,7 @@ kept_whole :: (path: string -> string) {
 comparable_path :: (path: string -> string) {
     *whole := path
     `scratch { if full := File.full_path(path) { whole = full } else if os_error { } }
-    #if #OS == .WINDOWS {
+    #if #program.os == .WINDOWS {
         return String.to_lower(String.trim_end_any(`scratch String.replace(whole, "\\", "/"), "/"))
     } #else {
         return String.copy(String.trim_end_any(whole, "/"))
@@ -451,7 +451,7 @@ processes_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
 }
 
 // A program's name, for examples.
-#if #OS == .WINDOWS {
+#if #program.os == .WINDOWS {
     EXAMPLE_PROGRAM :: "rain.exe"
 } #else {
     EXAMPLE_PROGRAM :: "rain"
