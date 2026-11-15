@@ -392,7 +392,7 @@ list_tools :: (out: *[..] u8) {
         tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default; it ends what the program started too). Gives its exit code, output and errors. Not git: that's the git tool's.",
              #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"timeout":{"type":"number"}},"required":["program"]}"#)
         append(out, ",")
-        tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/* for 30 days). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
+        tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line), unless its arguments give one (--amend --no-edit, -C <commit>, --fixup=<commit>, -F <file>). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/* for 30 days). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
              #"{"type":"object","properties":{"operation":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"},"folder":{"type":"string"},"permanent":{"type":"boolean"}},"required":["operation"]}"#)
         append(out, ",")
         tool(out, "edit", #"Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text ("") that doesn't exist is made with new as its contents. Paths are the project's."#,
@@ -972,13 +972,14 @@ git_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
         *input := ""
         if operation == "commit" {
             message := text_member(arguments, "message")
-            if message == "" {
-                tool_result(out, "a commit needs its message, as message", true)
+            if message != "" {
+                line.add("-F")
+                line.add("-")
+                input = message
+            } else if !message_elsewhere(extra) {
+                tool_result(out, "a commit needs its message, as message (or its arguments give one: --amend --no-edit keeps the one it has, -C <commit> reuses another's, --fixup=<commit> makes one, -F <file> reads a file's)", true)
                 return
             }
-            line.add("-F")
-            line.add("-")
-            input = message
         }
         for piece: extra { line.add(piece) }
         *note := ""
@@ -987,6 +988,22 @@ git_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
         }
         run_program(out, "git", ⟨folder: folder, input: input, timeout: DEFAULT_TIMEOUT⟩, "git", line, note)
     }
+}
+
+// Do a commit's arguments give its message some other way, so it needs no
+// message: --no-edit (an amend's keeps the one it has), -C or
+// --reuse-message (another commit's), --fixup (made from the commit it
+// fixes; but not amend: or reword:, which ask for one in an editor), or
+// -F or --file (a file's)? Without one, git would open an editor, and
+// nothing's there to answer it.
+message_elsewhere :: (extra: [] string -> bool) {
+    for piece: extra {
+        if piece == "--no-edit" or piece == "--fixup" or piece == "--reuse-message" or piece == "--file" then return true
+        if String.starts_with(piece, "-C") or String.starts_with(piece, "-F") then return true
+        if String.starts_with(piece, "--reuse-message=") or String.starts_with(piece, "--file=") then return true
+        if String.starts_with(piece, "--fixup=") and !String.starts_with(piece, "--fixup=amend:") and !String.starts_with(piece, "--fixup=reword:") then return true
+    }
+    return false
 }
 
 // Does a git command only look, or only add to what's kept?

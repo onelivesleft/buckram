@@ -26,7 +26,9 @@ runs as it is downloaded: nothing needs building first.
 - **git**: any of git's commands (`operation`), with more arguments as a
   list, in the project or in `folder`. A commit's message is given as
   `message`, and goes to git as its input (`git commit -F -`), never on a
-  command line. Before a command that can lose uncommitted work
+  command line; one whose arguments give it otherwise (`--amend
+  --no-edit`, `-C <commit>`, `--fixup=<commit>`, `-F <file>`) needs none,
+  and any other is refused, as git would wait in an editor. Before a command that can lose uncommitted work
   (`checkout`, `reset`, `restore`, `stash`, `clean`, `rebase`, ...: any but
   those that only look or only add, such as `status`, `log`, `add`,
   `commit`, `fetch`), the working tree is saved as a commit, untracked

@@ -31,7 +31,8 @@ do; in short:
   `log`, `add`, `commit`, `checkout`, `stash`, ...), more arguments as a
   list, and `folder` for a repository other than the project. Give a
   commit's message as `message`, exactly as it should be: it goes to git
-  as its input. Before a command that can lose uncommitted work, buckram
+  as its input (a commit whose arguments give one, `--amend --no-edit`,
+  `-C <commit>`, `--fixup=<commit>` or `-F <file>`, needs none). Before a command that can lose uncommitted work, buckram
   saves the working tree (untracked files too, not ignored ones) as a
   commit, `refs/buckram/saved/<when>` (kept 30 days), without touching it
   or the index, and the result begins with its hash: `git restore --source=<hash> --
