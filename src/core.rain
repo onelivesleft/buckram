@@ -425,10 +425,10 @@ list_tools :: (out: *[..] u8) {
             *description := task.description
             if description == "" then description = "Runs the project's task '«task.name»'."
             if task.takes == .LIST {
-                tool(out, task.name, "«description» Arguments given as a list are added after its own. «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.",
+                tool(out, task.name, "«description» Arguments given as a list are added after its own. «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)», unless given a timeout.",
                      #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"timeout":{"type":"number"}}}"#)
             } else {
-                tool(out, task.name, "«description» «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)» seconds, unless given a timeout.", #"{"type":"object","properties":{"folder":{"type":"string"},"timeout":{"type":"number"}}}"#)
+                tool(out, task.name, "«description» «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)», unless given a timeout.", #"{"type":"object","properties":{"folder":{"type":"string"},"timeout":{"type":"number"}}}"#)
             }
         }
         append(out, "]}")
@@ -625,11 +625,11 @@ described :: (value: Json.Json_Value -> string) {
     return "an object"
 }
 
-// Seconds as text: 600, or 0.5.
+// Seconds as text, with the unit: 600 seconds, 1 second, or 0.5 seconds.
 seconds_text :: (seconds: f64 -> string) {
     whole := i64'seconds
-    if f64'whole == seconds then return "«whole»"
-    return "«seconds»"
+    if f64'whole == seconds then return "«whole» second«plural(whole)»"
+    return "«seconds» seconds"
 }
 
 // A number of seconds: given as a number, or a string of one (as agents
@@ -1299,7 +1299,7 @@ run_program :: (out: *[..] u8, tool_name: string, options: System.Run_Options, p
     if code, output, errors, timed_out := System.run_with(options, program, arguments..) {
         *text: [..] u8
         append(text, note)
-        if timed_out { append(text, "timed out after «seconds_text(options.timeout)» seconds, so it was ended, with what it started\n") }
+        if timed_out { append(text, "timed out after «seconds_text(options.timeout)», so it was ended, with what it started\n") }
         else { append(text, "exit code «code»\n") }
         append(text, output)
         if errors.count > 0 {
@@ -1311,7 +1311,7 @@ run_program :: (out: *[..] u8, tool_name: string, options: System.Run_Options, p
             *said := first_line(errors)
             if said == "" then said = first_line(output)
             *head := "exit code «code»"
-            if timed_out then head = "timed out after «seconds_text(options.timeout)» seconds"
+            if timed_out then head = "timed out after «seconds_text(options.timeout)»"
             if said == "" { why_failed = `global String.copy(head) } else { why_failed = `global "«head»: «said»" }
         }
     } else if absent {
