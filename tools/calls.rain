@@ -121,7 +121,7 @@ keep :: (list: *[..] Call, call: Call) {
 
 // A line of a log, read and added up.
 take :: (line: string, totals: *Totals) {
-    scratch.rewind_at_end()
+    #with scratch.rewind()
     *call: Call
     *program := ""
     *failed := false
@@ -194,7 +194,7 @@ clip :: (text: string, most: i64 -> string) #pure {
 }
 
 show :: (title: string, table: *Table(string, Stat), most: i64, by_calls: bool) {
-    scratch.rewind_at_end()
+    #with scratch.rewind()
     *rows: [..] Stat
     for s: table { `scratch rows.add(s) }
     if by_calls then rows.sort_by(more_calls)
@@ -222,7 +222,7 @@ show_calls :: (title: string, calls: [] Call) {
 
 // The logs a path names: itself, or a folder's calls.*.jsonl.
 add_logs :: (path: string, logs: *[..] string) {
-    scratch.rewind_at_end()
+    #with scratch.rewind()
     if File.folder_exists(path) {
         `scratch {
             if entries := File.files_in(path) is not absent or os_error {
