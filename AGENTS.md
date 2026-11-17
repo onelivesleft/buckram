@@ -105,8 +105,10 @@ A tool's result is an error when its program exits with a code other than
    folder more than one system uses (a task with none for this system
    isn't offered here; `task`'s description names it; there, `add_task`
    writes a new task's command for this system only, as one that works
-   here may not run there); `arguments` is `"none"` or `"list"` (more
-   arguments added after its own); `timeout` is in seconds (600 by
+   here may not run there); `arguments` is `"none"`, `"list"` (more
+   arguments added after its own) or `"joined"` (the same, the first
+   joined to its run's last piece: `["rain", "-test:"]` given `String`
+   runs `rain -test:String`); `timeout` is in seconds (600 by
    default; a call can give its own). Say in each
    description what it gives back and what arguments it takes, since
    that's what the next agent reads. Call real programs, not `.bat` or

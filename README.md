@@ -117,8 +117,10 @@ for each, keeping the other's, and so into any task of a file whose tasks
 give one for each (a task's one command then stays the other system's);
 in any other file, the one command;
 `remove_task` takes this system's out of a task that has one for each,
-and otherwise the whole task. Its `arguments` is `"none"` (the default) or
-`"list"`, for a tool that takes a list of strings to add after them. Its
+and otherwise the whole task. Its `arguments` is `"none"` (the default),
+`"list"`, for a tool that takes a list of strings to add after them, or
+`"joined"`, the same with the first joined to the run's last piece (`-test:`
+given `String` is `-test:String`). Its
 `timeout` is in seconds (600 by default), and a call can give its own (a
 number, or a string of one). A task can't have the name of one of
 buckram's own tools.
