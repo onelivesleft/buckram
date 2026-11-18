@@ -226,27 +226,27 @@ initialize :: (id: Json.Json_Value, params: Json.Json_Value) {
         if given := Json.member(params, "protocolVersion") is not absent {
             if given is text { version = text }
         }
-        *out: [..] u8
-        append(out, #"{"jsonrpc":"2.0","id":"#)
+        *out: String.Builder
+        out.add(#"{"jsonrpc":"2.0","id":"#)
         Json.write_json(out, id)
-        append(out, #","result":{"protocolVersion":"#)
+        out.add(#","result":{"protocolVersion":"#)
         Json.write_json_text(out, version)
-        append(out, #","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"buckram","version":"«VERSION»"},"instructions":"#)
+        out.add(#","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"buckram","version":"«VERSION»"},"instructions":"#)
         Json.write_json_text(out, INSTRUCTIONS)
-        append(out, "}}")
-        echo(string'out)
+        out.add("}}")
+        echo(out.build_and_reset())
     }
 }
 
 respond_error :: (id: Json.Json_Value, code: i64, message: string) {
     #with scratch.rewind()
     `scratch {
-        *out: [..] u8
-        append(out, #"{"jsonrpc":"2.0","id":"#)
+        *out: String.Builder
+        out.add(#"{"jsonrpc":"2.0","id":"#)
         Json.write_json(out, id)
-        append(out, #","error":{"code":«code»,"message":"#)
+        out.add(#","error":{"code":«code»,"message":"#)
         Json.write_json_text(out, message)
-        append(out, "}}")
-        echo(string'out)
+        out.add("}}")
+        echo(out.build_and_reset())
     }
 }

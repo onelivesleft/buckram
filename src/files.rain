@@ -14,7 +14,7 @@
 #import Json
 #import System
 
-files_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+files_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     operation := text_member(arguments, "operation")
     if operation == "list" { list_files(out, arguments); return }
     if operation == "copy" { copy_or_move(out, arguments, false); return }
@@ -35,7 +35,7 @@ bool_member :: (value: Json.Json_Value, name: string -> bool) {
 
 //- list
 
-list_files :: (out: *[..] u8, arguments: Json.Json_Value) {
+list_files :: (out: *String.Builder, arguments: Json.Json_Value) {
     `scratch {
         *given := text_member(arguments, "path")
         if given == "" then given = "."
@@ -47,7 +47,7 @@ list_files :: (out: *[..] u8, arguments: Json.Json_Value) {
             case os_error:
                 tool_result(out, "«given» can't be listed («os_error»)", true)
         } else {
-            *text: [..] u8
+            *text: String.Builder
             *files := 0
             *folders := 0
             *bytes: u64 = 0
@@ -56,16 +56,16 @@ list_files :: (out: *[..] u8, arguments: Json.Json_Value) {
                 *place := entry.name
                 if everything and entry.path.count > folder.count then place = String.trim_start_any(entry.path[folder.count:], "/\\")
                 if entry.is_folder {
-                    append(text, "-\t«entry.modified»\t«place»/\n")
+                    text.add("-\t«entry.modified»\t«place»/\n")
                     folders += 1
                 } else {
-                    append(text, "«entry.size»\t«entry.modified»\t«place»\n")
+                    text.add("«entry.size»\t«entry.modified»\t«place»\n")
                     files += 1
                     bytes += entry.size
                 }
             }
-            append(text, "«files» file«plural(files)» («bytes» bytes), «folders» folder«plural(folders)», in «given»")
-            tool_result(out, limited("files", string'text), false)
+            text.add("«files» file«plural(files)» («bytes» bytes), «folders» folder«plural(folders)», in «given»")
+            tool_result(out, limited("files", text.build_and_reset()), false)
         }
     }
 }
@@ -82,7 +82,7 @@ entries_of :: (folder: string, everything: bool -> entries: [] File.Entry) [abse
 
 //- copy and move
 
-copy_or_move :: (out: *[..] u8, arguments: Json.Json_Value, moving: bool) {
+copy_or_move :: (out: *String.Builder, arguments: Json.Json_Value, moving: bool) {
     `scratch {
         *verb := "copy"
         if moving then verb = "move"
@@ -274,28 +274,28 @@ clear_read_only :: (path: string) {
 
 //- delete
 
-delete_paths :: (out: *[..] u8, arguments: Json.Json_Value) {
+delete_paths :: (out: *String.Builder, arguments: Json.Json_Value) {
     `scratch {
         paths := texts_member(arguments, "paths")
         if paths.count == 0 {
             tool_result(out, "delete needs paths: a list of the files and folders to delete", true)
             return
         }
-        *text: [..] u8
+        *text: String.Builder
         *failed := false
         for given: paths {
             path := in_project(given)
             why := kept_whole(path)
             if why != "" {
-                append(text, "«given» «why»: left alone\n")
+                text.add("«given» «why»: left alone\n")
                 failed = true
                 continue
             }
             if File.folder_exists(path) {
                 if count := delete_everything(path) {
-                    append(text, "deleted «given»/ («count» file«plural(count)»)\n")
+                    text.add("deleted «given»/ («count» file«plural(count)»)\n")
                 } else if os_error {
-                    append(text, "«given»/ can't all be deleted («os_error»)\n")
+                    text.add("«given»/ can't all be deleted («os_error»)\n")
                     failed = true
                 }
                 continue
@@ -303,15 +303,15 @@ delete_paths :: (out: *[..] u8, arguments: Json.Json_Value) {
             clear_read_only(path)
             if File.delete_file(path) is {
                 case absent:
-                    append(text, "«given» wasn't there\n")
+                    text.add("«given» wasn't there\n")
                 case os_error:
-                    append(text, "«given» can't be deleted («os_error»)\n")
+                    text.add("«given» can't be deleted («os_error»)\n")
                     failed = true
             } else {
-                append(text, "deleted «given»\n")
+                text.add("deleted «given»\n")
             }
         }
-        tool_result(out, string'text, failed)
+        tool_result(out, text.build_and_reset(), failed)
     }
 }
 
@@ -365,7 +365,7 @@ delete_everything :: (folder: string -> count: i64) [os_error: File.System_Error
 
 //- processes
 
-processes_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+processes_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     `scratch {
         operation := text_member(arguments, "operation")
         if operation != "list" and operation != "end" {
@@ -381,17 +381,17 @@ processes_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
         }
         name := text_member(arguments, "name")
         if operation == "list" {
-            *text: [..] u8
+            *text: String.Builder
             *shown := 0
             for p: running {
                 if !named_like(p.name, name) then continue
-                append(text, "«p.id»\t«p.parent_id»\t«p.name»\n")
+                text.add("«p.id»\t«p.parent_id»\t«p.name»\n")
                 shown += 1
             }
             *which := ""
             if name != "" then which = " named like «name»"
-            append(text, "«shown» process«plural_es(shown)»«which» (id, parent, program)")
-            tool_result(out, limited("processes", string'text), false)
+            text.add("«shown» process«plural_es(shown)»«which» (id, parent, program)")
+            tool_result(out, limited("processes", text.build_and_reset()), false)
             return
         }
         *ids: [..] i64
@@ -420,7 +420,7 @@ processes_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
             at = parent
             depth += 1
         }
-        *text: [..] u8
+        *text: String.Builder
         *ended := 0
         *failed := false
         for p: running {
@@ -431,22 +431,22 @@ processes_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
             *runs_buckram := false
             for k: kept { if k == p.id then runs_buckram = true }
             if runs_buckram {
-                append(text, "«p.name» («p.id») is buckram, or runs it: left running\n")
+                text.add("«p.name» («p.id») is buckram, or runs it: left running\n")
                 continue
             }
             if System.end_process(p.id) is {
                 case absent:
-                    append(text, "«p.name» («p.id») had ended already\n")
+                    text.add("«p.name» («p.id») had ended already\n")
                 case os_error:
-                    append(text, "«p.name» («p.id») can't be ended («os_error»)\n")
+                    text.add("«p.name» («p.id») can't be ended («os_error»)\n")
                     failed = true
             } else {
-                append(text, "ended «p.name» («p.id»)\n")
+                text.add("ended «p.name» («p.id»)\n")
                 ended += 1
             }
         }
-        if ended == 0 and !failed then append(text, "no process ended: none is named «name», or has those ids\n")
-        tool_result(out, string'text, failed)
+        if ended == 0 and !failed then text.add("no process ended: none is named «name», or has those ids\n")
+        tool_result(out, text.build_and_reset(), failed)
     }
 }
 

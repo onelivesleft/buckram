@@ -81,7 +81,7 @@ bool_of :: (value: Json.Json_Value, name: string -> bool) {
 }
 
 // The texts of a list member, each a word of out.
-words_of :: (value: Json.Json_Value, name: string, out: *[..] u8) {
+words_of :: (value: Json.Json_Value, name: string, out: *String.Builder) {
     if v := Json.member(value, name) {
         if v is list {
             for item: list {
@@ -91,10 +91,10 @@ words_of :: (value: Json.Json_Value, name: string, out: *[..] u8) {
     } else if absent { }
 }
 
-add_word :: (out: *[..] u8, word: string) {
+add_word :: (out: *String.Builder, word: string) {
     if word.count == 0 then return
-    if out.count > 0 then out.append(" ")
-    out.append(word)
+    if out.count > 0 then out.add(" ")
+    out.add(word)
 }
 
 // One more call under the key (copied into the global arena the first time).
@@ -136,7 +136,7 @@ take :: (line: string, totals: *Totals) {
             if arguments := Json.member(value, "arguments") {
                 // What was called: run's program, or an operation, then the
                 // arguments, the paths, and edit's files.
-                *words: [..] u8
+                *words: String.Builder
                 program = text_of(arguments, "program")
                 if program.count == 0 then program = text_of(arguments, "operation")
                 if program.count == 0 and call.tool == "task" then program = text_of(arguments, "name")
@@ -157,7 +157,7 @@ take :: (line: string, totals: *Totals) {
                 } else if absent { }
                 folder := text_of(arguments, "folder")
                 if folder.count > 0 then add_word(words, "(in «folder»)")
-                call.what = string'words
+                call.what = words.build_and_reset()
             } else if absent { }
         } else if bad_json {
             totals.unreadable += 1

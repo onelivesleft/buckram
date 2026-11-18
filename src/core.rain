@@ -219,7 +219,7 @@ read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: str
         if run is list {
             if !strings_of(list, command) then fail: bad_task = "its run is a list of strings, the program first"
         } else if run is object {
-            *systems: [..] u8
+            *systems: String.Builder
             for system, i: object.names {
                 // (built in the global arena: a frame string here would
                 // make the region checks take task to be in the frame too)
@@ -232,11 +232,11 @@ read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: str
                 if system == THIS_SYSTEM {
                     for piece: pieces { command.add(piece) }
                 } else {
-                    if systems.count > 0 then append(systems, ", ")
-                    append(systems, system)
+                    if systems.count > 0 then systems.add(", ")
+                    systems.add(system)
                 }
             }
-            if command.count == 0 and systems.count > 0 then fail: only_for = string'systems
+            if command.count == 0 and systems.count > 0 then fail: only_for = systems.build_and_reset()
         } else {
             fail: bad_task = "its run is a list of strings (the program first), or an object of them by system: {\"windows\": [...], \"linux\": [...]}"
         }
@@ -274,24 +274,24 @@ machine_name :: (-> string) {
             if name := File.read_file("/proc/sys/kernel/hostname") { host = String.trim(name) } else if absent or os_error { }
         }
     }
-    *out: [..] u8
+    *out: String.Builder
     for c: `scratch String.to_lower(host) {
-        if (c >= "a" and c <= "z") or (c >= "0" and c <= "9") or c == "-" or c == "_" { out.add(c) } else { out.add("_") }
+        if (c >= "a" and c <= "z") or (c >= "0" and c <= "9") or c == "-" or c == "_" { out.add_byte(c) } else { out.add("_") }
     }
-    if out.count == 0 then append(out, "unknown")
-    append(out, "-«THIS_SYSTEM»")
-    return string'out
+    if out.count == 0 then out.add("unknown")
+    out.add("-«THIS_SYSTEM»")
+    return out.build_and_reset()
 }
 
 // The tasks with commands only for other systems, as text ("build
 // (windows), test (windows)"), or "".
 elsewhere_names :: (-> string) {
-    *names: [..] u8
+    *names: String.Builder
     for e, i: config.elsewhere {
-        if i > 0 then append(names, ", ")
-        append(names, "«e.name» («e.systems»)")
+        if i > 0 then names.add(", ")
+        names.add("«e.name» («e.systems»)")
     }
-    return string'names
+    return names.build_and_reset()
 }
 
 // Why there's no task of the name here: it has commands only for other
@@ -343,18 +343,18 @@ handle :: (line: string) {
             if !has_id then return        // a notification (notifications/initialized, ...): nothing to answer
             *params: Json.Json_Value
             if p := Json.member(request, "params") is not absent { params = p }
-            *result: [..] u8
+            *result: String.Builder
             if method == "tools/list" {
                 list_tools(result)
             } else if method == "tools/call" {
                 call_tool(result, params)
             } else if method == "ping" {
-                append(result, "{}")
+                result.add("{}")
             } else {
                 respond_error(id, -32601, "there's no method '«method»'")
                 return
             }
-            respond(id, string'result)
+            respond(id, result.build_and_reset())
         } else if bad_json {
             respond_error(Json.Json_Value.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
         }
@@ -364,24 +364,24 @@ handle :: (line: string) {
 respond :: (id: Json.Json_Value, result: string) {
     #with scratch.rewind()
     `scratch {
-        *out: [..] u8
-        append(out, #"{"jsonrpc":"2.0","id":"#)
+        *out: String.Builder
+        out.add(#"{"jsonrpc":"2.0","id":"#)
         Json.write_json(out, id)
-        append(out, #","result":"#, result, "}")
-        echo(string'out)
+        out.add(#","result":"#, result, "}")
+        echo(out.build_and_reset())
     }
 }
 
 respond_error :: (id: Json.Json_Value, code: i64, message: string) {
     #with scratch.rewind()
     `scratch {
-        *out: [..] u8
-        append(out, #"{"jsonrpc":"2.0","id":"#)
+        *out: String.Builder
+        out.add(#"{"jsonrpc":"2.0","id":"#)
         Json.write_json(out, id)
-        append(out, #","error":{"code":«code»,"message":"#)
+        out.add(#","error":{"code":«code»,"message":"#)
         Json.write_json_text(out, message)
-        append(out, "}}")
-        echo(string'out)
+        out.add("}}")
+        echo(out.build_and_reset())
     }
 }
 
@@ -391,42 +391,43 @@ respond_error :: (id: Json.Json_Value, code: i64, message: string) {
 ARGUMENTS_SCHEMA :: #"{"type":"array","items":{"type":"string"}}"#
 FOLDER_NOTE :: "It runs in the project's folder, or in folder (a worktree, say: a program the task gives as a path is then that folder's)."
 
-list_tools :: (out: *[..] u8) {
+list_tools :: (out: *String.Builder) {
     `scratch {
-        append(out, #"{"tools":["#)
+        out.add(#"{"tools":["#)
         tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default; it ends what the program started too). Gives its exit code, output and errors. Not git: that's the git tool's.",
              #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"timeout":{"type":"number"}},"required":["program"]}"#)
-        append(out, ",")
+        out.add(",")
         tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line), unless its arguments give one (--amend --no-edit, -C <commit>, --fixup=<commit>, -F <file>). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/* for 30 days). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
              #"{"type":"object","properties":{"operation":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"},"folder":{"type":"string"},"permanent":{"type":"boolean"}},"required":["operation"]}"#)
-        append(out, ",")
+        out.add(",")
         tool(out, "edit", #"Makes exact replacements in files, all or none: each edit's old text must be in its file exactly count times (1 by default), and every one is replaced with new. If any edit's old text isn't found as often, nothing is written. A file with no old text ("") that doesn't exist is made with new as its contents. Paths are the project's."#,
              #"{"type":"object","properties":{"edits":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"},"count":{"type":"integer"}},"required":["file","old","new"]}}},"required":["edits"]}"#)
-        append(out, ",")
+        out.add(",")
         tool(out, "files", #"Files and folders, with no program to write: list (path, the project's folder by default: each entry's size, when it was last written, and its name; all: true for everything beneath it too), copy or move (from, to: a file, or a folder and all in it; files there are replaced, and the folders on the way made), and delete (paths: files, or folders with everything in them; read-only files are made writable first). Paths are the project's unless whole."#,
              #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","copy","move","delete"]},"path":{"type":"string"},"all":{"type":"boolean"},"from":{"type":"string"},"to":{"type":"string"},"paths":«ARGUMENTS_SCHEMA»},"required":["operation"]}"#)
-        append(out, ",")
+        out.add(",")
         tool(out, "processes", #"The running processes: list (each one's id, its parent's, and its program; name to show only those whose program's name contains it), or end (name: every process of that program, such as «EXAMPLE_PROGRAM»; or ids). buckram, and what started it (the agent's own client), are never ended."#,
              #"{"type":"object","properties":{"operation":{"type":"string","enum":["list","end"]},"name":{"type":"string"},"ids":{"type":"array","items":{"type":"integer"}}},"required":["operation"]}"#)
-        append(out, ",")
-        *names: [..] u8
+        out.add(",")
+        *listed: String.Builder
         for task, i: config.tasks {
-            if i > 0 then append(names, ", ")
-            append(names, task.name)
+            if i > 0 then listed.add(", ")
+            listed.add(task.name)
         }
-        if names.count == 0 then append(names, "none yet")
+        if listed.count == 0 then listed.add("none yet")
+        names := listed.build_and_reset()
         *others := ""
         if config.elsewhere.count > 0 then others = " Tasks with commands only for other systems, so not here: «elsewhere_names()»."
-        tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, a folder to run it in (a worktree, say: its programs given as paths are then that folder's), and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now, for «THIS_SYSTEM»: «string'names».«others»",
+        tool(out, "task", "Runs one of the project's tasks (from buckram.json) by name, with arguments as a list for one that takes them, a folder to run it in (a worktree, say: its programs given as paths are then that folder's), and a timeout in seconds if not its own: the way to run a task added since the tools were last listed. Its tasks now, for «THIS_SYSTEM»: «names».«others»",
              #"{"type":"object","properties":{"name":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"timeout":{"type":"number"}},"required":["name"]}"#)
-        append(out, ",")
+        out.add(",")
         tool(out, "add_task", #"Adds a task to the project's buckram.json, or replaces one of the name: a program and its arguments (run, the program first; one given as a path is the project's), a description, whether it takes more arguments as a list (arguments: "none", "list", or "joined" for a list whose first is joined to the run's last piece, as "-test:" and a name), and a timeout in seconds. A task that has a command for each system («THIS_SYSTEM» and «OTHER_SYSTEM») gets this one's, the other's kept; so does any task when the file's tasks give a command for each, as a folder more than one system shares does (its one command stays the other's); in any other file it's one command for every system. It becomes a tool of its own once the client lists the tools again (buckram tells it to); task runs it meanwhile."#,
              #"{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"run":«ARGUMENTS_SCHEMA»,"arguments":{"type":"string","enum":["none","list","joined"]},"timeout":{"type":"number"}},"required":["name","run"]}"#)
-        append(out, ",")
+        out.add(",")
         tool(out, "remove_task", "Takes a task out of the project's buckram.json: from a task with a command for each system, only this one's («THIS_SYSTEM»'s), and the task once it has none.",
              #"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#)
         for task: config.tasks {
-            append(out, ",")
+            out.add(",")
             *description := task.description
             if description == "" then description = "Runs the project's task '«task.name»'."
             if task.takes != .NONE {
@@ -437,25 +438,29 @@ list_tools :: (out: *[..] u8) {
                 tool(out, task.name, "«description» «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)», unless given a timeout.", #"{"type":"object","properties":{"folder":{"type":"string"},"timeout":{"type":"number"}}}"#)
             }
         }
-        append(out, "]}")
+        out.add("]}")
     }
 }
 
-tool :: (out: *[..] u8, name: string, description: string, schema: string) {
-    append(out, #"{"name":"#)
+tool :: (out: *String.Builder, name: string, description: string, schema: string) {
+    out.add(#"{"name":"#)
     Json.write_json_text(out, name)
-    append(out, #","description":"#)
+    out.add(#","description":"#)
     Json.write_json_text(out, description)
-    append(out, #","inputSchema":"#, schema, "}")
+    out.add(#","inputSchema":"#, schema, "}")
 }
 
-call_tool :: (out: *[..] u8, params: Json.Json_Value) {
+call_tool :: (out: *String.Builder, params: Json.Json_Value) {
     start := Time.current_time_monotonic()
     name := text_member(params, "name")
     *arguments: Json.Json_Value
     if given := Json.member(params, "arguments") is not absent { arguments = given }
-    call_named_tool(out, name, arguments)
-    record_call(name, arguments, Time.current_time_monotonic() - start, string'out)
+    // (built apart, as the call's line in the log reads it too)
+    *answer: String.Builder
+    call_named_tool(answer, name, arguments)
+    result := `scratch answer.build_and_reset()
+    record_call(name, arguments, Time.current_time_monotonic() - start, result)
+    out.add(result)
 }
 
 ERROR_RESULT_END :: #""isError":true}"#
@@ -467,26 +472,26 @@ record_call :: (name: string, arguments: Json.Json_Value, took: Time.Apollo_Time
         if !File.folder_exists(folder) { if File.create_folder(folder) is os_error { } }
         *ms: i64 = 0
         if m := Time.to_milliseconds(took, true) { ms = m } else if too_big { }
-        *line: [..] u8
-        append(line, #"{"time":"#)
+        *line: String.Builder
+        line.add(#"{"time":"#)
         now := Time.current_time_consensus()
         Json.write_json_text(line, "«now»")
-        append(line, #","tool":"#)
+        line.add(#","tool":"#)
         Json.write_json_text(line, name)
-        append(line, #","arguments":"#)
+        line.add(#","arguments":"#)
         Json.write_json(line, arguments)
         failed := String.ends_with(result, ERROR_RESULT_END)
-        append(line, #","ms":«ms»,"error":«failed»,"bytes":«result.count»"#)
+        line.add(#","ms":«ms»,"error":«failed»,"bytes":«result.count»"#)
         if failed and why_failed != "" {
-            append(line, #","why":"#)
+            line.add(#","why":"#)
             Json.write_json_text(line, why_failed)
         }
-        append(line, "}\n")
-        if File.append_file(File.join_path(folder, "calls.«config.machine».jsonl"), string'line) is absent or os_error { }
+        line.add("}\n")
+        if File.append_file(File.join_path(folder, "calls.«config.machine».jsonl"), line.build_and_reset()) is absent or os_error { }
     }
 }
 
-call_named_tool :: (out: *[..] u8, name: string, arguments: Json.Json_Value) {
+call_named_tool :: (out: *String.Builder, name: string, arguments: Json.Json_Value) {
     // Each tool's parameters: one it hasn't is refused, rather than
     // dropped without a word.
     if name == "run" { if takes_only(out, name, arguments, "program:text arguments:texts folder:text input:text timeout:seconds") then run_tool(out, arguments); return }
@@ -530,20 +535,22 @@ call_named_tool :: (out: *[..] u8, name: string, arguments: Json.Json_Value) {
 // (a list of text), bool, seconds (a number, or text of one), integers (a
 // list of whole numbers) and list. A null is a parameter not given. If one
 // isn't right, its error is the result.
-takes_only :: (out: *[..] u8, tool_name: string, arguments: Json.Json_Value, parameters: string -> bool) {
-    *names: [..] u8
+takes_only :: (out: *String.Builder, tool_name: string, arguments: Json.Json_Value, parameters: string -> bool) {
+    *names := ""
     `scratch {
+        *listed: String.Builder
         for parameter, i: String.split(parameters, " ") {
-            if i > 0 then append(names, ", ")
-            append(names, before_colon(parameter))
+            if i > 0 then listed.add(", ")
+            listed.add(before_colon(parameter))
         }
+        names = listed.build_and_reset()
     }
     if arguments is object {
         for given, k: object.names {
             *type := ""
             for parameter: `scratch String.split(parameters, " ") { if before_colon(parameter) == given then type = after_colon(parameter) }
             if type == "" {
-                tool_result(out, "«tool_name» has no parameter '«given»' (its parameters: «string'names»)", true)
+                tool_result(out, "«tool_name» has no parameter '«given»' (its parameters: «names»)", true)
                 return false
             }
             why := `scratch wrong_type(object.values[k], type)
@@ -654,16 +661,16 @@ seconds_member :: (value: Json.Json_Value, name: string, fallback: f64 -> second
 }
 
 task_names :: (-> string) {
-    *names: [..] u8
+    *names: String.Builder
     for task, i: config.tasks {
-        if i > 0 then append(names, ", ")
-        append(names, task.name)
+        if i > 0 then names.add(", ")
+        names.add(task.name)
     }
-    if names.count == 0 then append(names, "none")
-    return string'names
+    if names.count == 0 then names.add("none")
+    return names.build_and_reset()
 }
 
-run_task :: (out: *[..] u8, task: Task, arguments: Json.Json_Value) {
+run_task :: (out: *String.Builder, task: Task, arguments: Json.Json_Value) {
     *command: [..] string
     for piece: task.command[1:] { command.add(piece) }
     if task.takes != .NONE {
@@ -757,10 +764,10 @@ with_member :: (object: Json.Json_Object, name: string, value: Json.Json_Value, 
 // Writes buckram.json, laid out to read.
 write_config_file :: (value: Json.Json_Value) [bad_config: string] {
     `scratch {
-        *out: [..] u8
+        *out: String.Builder
         Json.write_json(out, value, 2)
         out.add("\n")
-        if File.write_file(File.join_path(config.folder, CONFIG_FILE), string'out) {
+        if File.write_file(File.join_path(config.folder, CONFIG_FILE), out) {
         } else if absent {
             fail: bad_config = "«CONFIG_FILE» can't be written: the project's folder isn't there"
         } else if os_error {
@@ -784,7 +791,7 @@ good_name :: (name: string -> bool) {
     return true
 }
 
-add_task_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+add_task_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     `scratch {
         name := text_member(arguments, "name")
         if !good_name(name) {
@@ -878,7 +885,7 @@ add_task_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
     }
 }
 
-remove_task_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+remove_task_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     `scratch {
         name := text_member(arguments, "name")
         *file: Json.Json_Value
@@ -921,7 +928,7 @@ remove_task_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
     }
 }
 
-run_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+run_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     program := text_member(arguments, "program")
     if program == "" {
         tool_result(out, "run needs a program", true)
@@ -949,7 +956,7 @@ is_git :: (program: string -> bool) {
     return name == "git" or name == "git.exe"
 }
 
-git_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+git_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     `scratch {
         *operation := text_member(arguments, "operation")
         if operation == "" then operation = text_member(arguments, "command")     // (its name before 741)
@@ -1233,7 +1240,7 @@ read_edit :: (item: Json.Json_Value, k: i64 -> e: Edit, error: string) {
     }
 }
 
-edit_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
+edit_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     `scratch {
         *edits: [..] Edit
         if given := Json.member(arguments, "edits") is not absent {
@@ -1306,29 +1313,31 @@ edit_tool :: (out: *[..] u8, arguments: Json.Json_Value) {
 
 // Runs it, and gives back what happened as the tool's result (after the
 // note, if there is one).
-run_program :: (out: *[..] u8, tool_name: string, options: System.Run_Options, program: string, arguments: [] string, note: string = "") {
-    if code, output, errors, timed_out := System.run_with(options, program, arguments..) {
-        *text: [..] u8
-        append(text, note)
-        if timed_out { append(text, "timed out after «seconds_text(options.timeout)», so it was ended, with what it started\n") }
-        else { append(text, "exit code «code»\n") }
-        append(text, output)
-        if errors.count > 0 {
-            if output.count > 0 and !String.ends_with(output, "\n") then append(text, "\n")
-            append(text, "--- errors ---\n", errors)
+run_program :: (out: *String.Builder, tool_name: string, options: System.Run_Options, program: string, arguments: [] string, note: string = "") {
+    `scratch {
+        if code, output, errors, timed_out := System.run_with(options, program, arguments..) {
+            *text: String.Builder
+            text.add(note)
+            if timed_out { text.add("timed out after «seconds_text(options.timeout)», so it was ended, with what it started\n") }
+            else { text.add("exit code «code»\n") }
+            text.add(output)
+            if errors.count > 0 {
+                if output.count > 0 and !String.ends_with(output, "\n") then text.add("\n")
+                text.add("--- errors ---\n", errors)
+            }
+            tool_result(out, limited(tool_name, text.build_and_reset()), timed_out or code != 0)
+            if timed_out or code != 0 {
+                *said := first_line(errors)
+                if said == "" then said = first_line(output)
+                *head := "exit code «code»"
+                if timed_out then head = "timed out after «seconds_text(options.timeout)»"
+                if said == "" { why_failed = `global String.copy(head) } else { why_failed = `global "«head»: «said»" }
+            }
+        } else if absent {
+            tool_result(out, "there's no program '«program»' (a path, or a name on the PATH)", true)
+        } else if os_error {
+            tool_result(out, "'«program»' couldn't be run: «os_error»", true)
         }
-        tool_result(out, limited(tool_name, string'text), timed_out or code != 0)
-        if timed_out or code != 0 {
-            *said := first_line(errors)
-            if said == "" then said = first_line(output)
-            *head := "exit code «code»"
-            if timed_out then head = "timed out after «seconds_text(options.timeout)»"
-            if said == "" { why_failed = `global String.copy(head) } else { why_failed = `global "«head»: «said»" }
-        }
-    } else if absent {
-        tool_result(out, "there's no program '«program»' (a path, or a name on the PATH)", true)
-    } else if os_error {
-        tool_result(out, "'«program»' couldn't be run: «os_error»", true)
     }
 }
 
@@ -1370,9 +1379,9 @@ first_line :: (text: string -> string) {
     return ""
 }
 
-tool_result :: (out: *[..] u8, text: string, is_error: bool) {
+tool_result :: (out: *String.Builder, text: string, is_error: bool) {
     if is_error then why_failed = `global String.copy(first_line(text))
-    append(out, #"{"content":[{"type":"text","text":"#)
+    out.add(#"{"content":[{"type":"text","text":"#)
     Json.write_json_text(out, text)
-    append(out, #"}],"isError":«is_error»}"#)
+    out.add(#"}],"isError":«is_error»}"#)
 }
