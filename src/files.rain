@@ -374,7 +374,7 @@ delete_everything :: (folder: string -> count: i64) [os_error: File.System_Error
             fail: os_error = os_error
         }
         if File.delete_folder(folder, true) is {
-            case absent:
+            case absent: _
             case os_error:
                 fail: os_error = os_error
         }

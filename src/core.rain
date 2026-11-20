@@ -163,7 +163,7 @@ load_config :: (-> loaded: Config) {
     *read := false
     `scratch {
         if found := File.read_file(File.join_path(loaded.folder, CONFIG_FILE)) is {
-            case absent:
+            case absent: _
             case os_error:
                 log("buckram.json can't be read («os_error»)")
         }
@@ -739,7 +739,7 @@ read_config_file :: (-> value: Json.Json_Value) [bad_config: string] {
     *why: File.System_Error
     `scratch {
         if found := File.read_file(File.join_path(config.folder, CONFIG_FILE)) is {
-            case absent:
+            case absent: _
             case os_error:
                 unreadable = true
                 why = os_error

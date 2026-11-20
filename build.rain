@@ -70,7 +70,7 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
         // Then the old one goes, and the new one takes its place.
         if File.file_exists(target) {
             if File.delete_file(target) is {
-                case absent:
+                case absent: _
                 case os_error:
                     // In use: moved aside, to run on from there.
                     *n := 1
