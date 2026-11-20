@@ -60,9 +60,11 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
                 if File.delete_file(built) is absent or os_error { }
                 fail: failed = "«source» didn't build, so bin/«exe» is as it was:\n«output»«errors»"
             }
-        } else if absent {
+        }
+        else if absent {
             fail: failed = "there's no compiler '«compiler»': give its path, build.exe C:/rain/build/rain.exe"
-        } else if os_error {
+        }
+        else if os_error {
             fail: failed = "the compiler couldn't be run («os_error»)"
         }
         // Then the old one goes, and the new one takes its place.
@@ -76,7 +78,8 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
                     aside := File.join_path(old, aside_name(exe, n))
                     if File.rename_file(target, aside) {
                         echo("«exe» is in use: moved to bin/old_exes/«File.file_name(aside)», where it runs on")
-                    } else if absent or os_error {
+                    }
+                    else if absent or os_error {
                         fail: failed = "«exe» is in use, and can't be moved aside either: the new one is bin/old_exes/new_«exe»"
                     }
             }

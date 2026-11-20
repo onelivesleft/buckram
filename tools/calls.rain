@@ -60,7 +60,8 @@ MOST :: 30
 text_of :: (value: Json.Json_Value, name: string -> string) {
     if v := Json.member(value, name) {
         if v is text then return text
-    } else if absent { }
+    }
+    else if absent { }
     return ""
 }
 
@@ -69,14 +70,16 @@ number_of :: (value: Json.Json_Value, name: string -> i64) {
         if v is number {
             if n := String.to_i64(number) { return n } else if invalid or too_big { }
         }
-    } else if absent { }
+    }
+    else if absent { }
     return 0
 }
 
 bool_of :: (value: Json.Json_Value, name: string -> bool) {
     if v := Json.member(value, name) {
         if v is boolean then return boolean
-    } else if absent { }
+    }
+    else if absent { }
     return false
 }
 
@@ -88,7 +91,8 @@ words_of :: (value: Json.Json_Value, name: string, out: *String.Builder) {
                 if item is text then add_word(out, text)
             }
         }
-    } else if absent { }
+    }
+    else if absent { }
 }
 
 add_word :: (out: *String.Builder, word: string) {
@@ -111,7 +115,8 @@ record :: (table: *Table(string, Stat), key: string, ms: i64, failed: bool) {
         }
         s.ms += ms
         if ms > s.max_ms then s.max_ms = ms
-    } else if absent { }
+    }
+    else if absent { }
 }
 
 keep :: (list: *[..] Call, call: Call) {
@@ -154,12 +159,15 @@ take :: (line: string, totals: *Totals) {
                             add_word(words, file.file_name())
                         }
                     }
-                } else if absent { }
+                }
+                else if absent { }
                 folder := text_of(arguments, "folder")
                 if folder.count > 0 then add_word(words, "(in «folder»)")
                 call.what = words.build_and_reset()
-            } else if absent { }
-        } else if bad_json {
+            }
+            else if absent { }
+        }
+        else if bad_json {
             totals.unreadable += 1
             return
         }
@@ -244,9 +252,11 @@ main :: (args: [] string) [usage: string] {
     for arg: args[1:] {
         if arg.starts_with("-since:") {
             totals.since = arg["-since:".count:]
-        } else if arg.starts_with("-") {
+        }
+        else if arg.starts_with("-") {
             fail: usage = "calls.rain takes logs, or folders of them, and -since:<time>, not «arg»"
-        } else {
+        }
+        else {
             add_logs(arg, logs)
         }
     }
@@ -256,7 +266,8 @@ main :: (args: [] string) [usage: string] {
     for path: logs {
         if text := File.read_file(path) {
             texts.add(text)
-        } else if absent or os_error {
+        }
+        else if absent or os_error {
             echo("can't read «path»")
         }
     }

@@ -122,7 +122,8 @@ Elsewhere :: struct {
 #if #program.os == .WINDOWS {
     THIS_SYSTEM :: "windows"
     OTHER_SYSTEM :: "linux"
-} #else {
+}
+#else {
     THIS_SYSTEM :: "linux"
     OTHER_SYSTEM :: "windows"
 }
@@ -165,7 +166,8 @@ load_config :: (-> loaded: Config) {
             case absent:
             case os_error:
                 log("buckram.json can't be read («os_error»)")
-        } else {
+        }
+        else {
             contents = found
             read = true
         }
@@ -189,15 +191,18 @@ load_config :: (-> loaded: Config) {
                         }
                         if task := read_task(name, object.values[i]) {
                             tasks.add(task)
-                        } else if bad_task {
+                        }
+                        else if bad_task {
                             log("the task '«name»': «bad_task»")
-                        } else if only_for {
+                        }
+                        else if only_for {
                             elsewhere.add(⟨name, only_for⟩)
                         }
                     }
                 }
             }
-        } else if bad_json {
+        }
+        else if bad_json {
             log("buckram.json isn't JSON (at byte «bad_json.at»: «bad_json.why»), so it has no tasks")
         }
     }
@@ -218,7 +223,8 @@ read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: str
     if run := Json.member(value, "run") is not absent {
         if run is list {
             if !strings_of(list, command) then fail: bad_task = "its run is a list of strings, the program first"
-        } else if run is object {
+        }
+        else if run is object {
             *systems: String.Builder
             for system, i: object.names {
                 // (built in the global arena: a frame string here would
@@ -231,13 +237,15 @@ read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: str
                 if !good then fail: bad_task = `global "its run for «system» is a list of strings, the program first"
                 if system == THIS_SYSTEM {
                     for piece: pieces { command.add(piece) }
-                } else {
+                }
+                else {
                     if systems.count > 0 then systems.add(", ")
                     systems.add(system)
                 }
             }
             if command.count == 0 and systems.count > 0 then fail: only_for = systems.build_and_reset()
-        } else {
+        }
+        else {
             fail: bad_task = "its run is a list of strings (the program first), or an object of them by system: {\"windows\": [...], \"linux\": [...]}"
         }
     }
@@ -270,7 +278,8 @@ machine_name :: (-> string) {
     `scratch {
         #if #program.os == .WINDOWS {
             if name := System.environment("COMPUTERNAME") { host = name } else if absent or os_error { }
-        } #else {
+        }
+        #else {
             if name := File.read_file("/proc/sys/kernel/hostname") { host = String.trim(name) } else if absent or os_error { }
         }
     }
@@ -308,7 +317,8 @@ text_member :: (value: Json.Json_Value, name: string -> string) {
     if found := Json.member(value, name) {
         if found is text then return text
         return ""
-    } else if absent {
+    }
+    else if absent {
         return ""
     }
 }
@@ -321,7 +331,8 @@ texts_member :: (value: Json.Json_Value, name: string -> [] string) {
             for item: list { if item is text { texts.add(text) } }
         }
         return texts
-    } else if absent {
+    }
+    else if absent {
         return texts
     }
 }
@@ -346,16 +357,20 @@ handle :: (line: string) {
             *result: String.Builder
             if method == "tools/list" {
                 list_tools(result)
-            } else if method == "tools/call" {
+            }
+            else if method == "tools/call" {
                 call_tool(result, params)
-            } else if method == "ping" {
+            }
+            else if method == "ping" {
                 result.add("{}")
-            } else {
+            }
+            else {
                 respond_error(id, -32601, "there's no method '«method»'")
                 return
             }
             respond(id, result.build_and_reset())
-        } else if bad_json {
+        }
+        else if bad_json {
             respond_error(Json.Json_Value.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
         }
     }
@@ -434,7 +449,8 @@ list_tools :: (out: *String.Builder) {
                 joined := if task.takes == .JOINED then " (the first joined to its last, «task.command[# - 1]»)" else ""
                 tool(out, task.name, "«description» Arguments given as a list are added after its own«joined». «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)», unless given a timeout.",
                      #"{"type":"object","properties":{"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"timeout":{"type":"number"}}}"#)
-            } else {
+            }
+            else {
                 tool(out, task.name, "«description» «FOLDER_NOTE» It's ended after «seconds_text(task.timeout)», unless given a timeout.", #"{"type":"object","properties":{"folder":{"type":"string"},"timeout":{"type":"number"}}}"#)
             }
         }
@@ -650,11 +666,14 @@ seconds_member :: (value: Json.Json_Value, name: string, fallback: f64 -> second
     if found := Json.member(value, name) is not absent {
         if found is none {
             // not given
-        } else if found is number {
+        }
+        else if found is number {
             if s := String.to_f64(number) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not «number»" }
-        } else if found is text {
+        }
+        else if found is text {
             if s := String.to_f64(String.trim(text)) { seconds = s } else if invalid { fail: bad_seconds = "«name» is a number of seconds, not '«text»'" }
-        } else {
+        }
+        else {
             fail: bad_seconds = "«name» is a number of seconds"
         }
     }
@@ -678,7 +697,8 @@ run_task :: (out: *String.Builder, task: Task, arguments: Json.Json_Value) {
             // (joined: "-test:" given "String" is -test:String)
             if i == 0 and task.takes == .JOINED and command.count > 0 {
                 command[command.count - 1] = "«command[command.count - 1]»«extra»"
-            } else {
+            }
+            else {
                 command.add(extra)
             }
         }
@@ -700,7 +720,8 @@ run_task :: (out: *String.Builder, task: Task, arguments: Json.Json_Value) {
     *timeout := task.timeout
     if seconds := seconds_member(arguments, "timeout", task.timeout) {
         timeout = seconds
-    } else if bad_seconds {
+    }
+    else if bad_seconds {
         tool_result(out, bad_seconds, true)
         return
     }
@@ -722,7 +743,8 @@ read_config_file :: (-> value: Json.Json_Value) [bad_config: string] {
             case os_error:
                 unreadable = true
                 why = os_error
-        } else {
+        }
+        else {
             contents = found
             read = true
         }
@@ -731,7 +753,8 @@ read_config_file :: (-> value: Json.Json_Value) [bad_config: string] {
     if read {
         if parsed := Json.parse_json(contents) {
             if parsed is object { value = parsed } else { fail: bad_config = "«CONFIG_FILE» isn't a JSON object, so it isn't changed" }
-        } else if bad_json {
+        }
+        else if bad_json {
             fail: bad_config = "«CONFIG_FILE» isn't JSON (at byte «bad_json.at»: «bad_json.why»), so it isn't changed: fix it with edit"
         }
     }
@@ -768,9 +791,11 @@ write_config_file :: (value: Json.Json_Value) [bad_config: string] {
         Json.write_json(out, value, 2)
         out.add("\n")
         if File.write_file(File.join_path(config.folder, CONFIG_FILE), out) {
-        } else if absent {
+        }
+        else if absent {
             fail: bad_config = "«CONFIG_FILE» can't be written: the project's folder isn't there"
-        } else if os_error {
+        }
+        else if os_error {
             fail: bad_config = "«CONFIG_FILE» can't be written («os_error»)"
         }
     }
@@ -824,7 +849,8 @@ add_task_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
         *pieces: [..] Json.Json_Value
         for piece: run { pieces.add(Json.Json_Value.text(piece)) }
         *file: Json.Json_Value
-        if read := read_config_file() { file = read } else if bad_config {
+        if read := read_config_file() { file = read }
+        else if bad_config {
             tool_result(out, bad_config, true)
             return
         }
@@ -854,11 +880,13 @@ add_task_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
                     run_value = Json.Json_Value.object(with_member(object, THIS_SYSTEM, Json.Json_Value.list(pieces), false))
                     how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM»"
                     for system: object.names { if system == OTHER_SYSTEM then how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM» («OTHER_SYSTEM» keeps its own command)" }
-                } else if shared {
+                }
+                else if shared {
                     // Its one command stays the other system's.
                     run_value = Json.Json_Value.object(with_member(as_object(this_only), OTHER_SYSTEM, old_run, false))
                     how = "replaced in «CONFIG_FILE» for «THIS_SYSTEM» («OTHER_SYSTEM» keeps the command it had)"
-                } else {
+                }
+                else {
                     run_value = Json.Json_Value.list(pieces)
                 }
             }
@@ -889,14 +917,16 @@ remove_task_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     `scratch {
         name := text_member(arguments, "name")
         *file: Json.Json_Value
-        if read := read_config_file() { file = read } else if bad_config {
+        if read := read_config_file() { file = read }
+        else if bad_config {
             tool_result(out, bad_config, true)
             return
         }
         *tasks := Json.Json_Object⟨⟩
         if listed := Json.member(file, "tasks") is not absent { tasks = as_object(listed) }
         *existing: Json.Json_Value
-        if found := Json.member(Json.Json_Value.object(tasks), name) { existing = found } else if absent {
+        if found := Json.member(Json.Json_Value.object(tasks), name) { existing = found }
+        else if absent {
             tool_result(out, "there's no task '«name»' in «CONFIG_FILE» (its tasks for «THIS_SYSTEM»: «task_names()»)", true)
             return
         }
@@ -943,7 +973,8 @@ run_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     *timeout := DEFAULT_TIMEOUT
     if seconds := seconds_member(arguments, "timeout", DEFAULT_TIMEOUT) {
         timeout = seconds
-    } else if bad_seconds {
+    }
+    else if bad_seconds {
         tool_result(out, bad_seconds, true)
         return
     }
@@ -978,7 +1009,8 @@ git_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
         if !only_looks(operation, extra) {
             if commit := save_working_tree(folder, operation) {
                 saved = commit
-            } else if failed {
+            }
+            else if failed {
                 tool_result(out, "the working tree couldn't be saved first, so git «operation» wasn't run: «failed»", true)
                 return
             }
@@ -994,7 +1026,8 @@ git_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
                 line.add("-F")
                 line.add("-")
                 input = message
-            } else if !message_elsewhere(extra) {
+            }
+            else if !message_elsewhere(extra) {
                 tool_result(out, "a commit needs its message, as message (or its arguments give one: --amend --no-edit keeps the one it has, -C <commit> reuses another's, --fixup=<commit> makes one, -F <file> reads a file's)", true)
                 return
             }
@@ -1080,7 +1113,8 @@ save_working_tree :: (folder: string, operation: string -> commit: string) [fail
         if value := System.environment("GIT_INDEX_FILE") {
             had_index_file = true
             index_file_was = value
-        } else if absent or os_error {
+        }
+        else if absent or os_error {
         }
     }
     if System.set_environment("GIT_INDEX_FILE", copy.text) is os_error then fail: failed = "GIT_INDEX_FILE can't be set"
@@ -1088,7 +1122,8 @@ save_working_tree :: (folder: string, operation: string -> commit: string) [fail
     tree := git_output(folder, "write-tree")
     if had_index_file {
         if System.set_environment("GIT_INDEX_FILE", index_file_was) is os_error then fail: failed = "GIT_INDEX_FILE can't be set back"
-    } else {
+    }
+    else {
         if System.remove_environment("GIT_INDEX_FILE") is os_error then fail: failed = "GIT_INDEX_FILE can't be removed"
     }
     if File.delete_file(copy.text) is absent or os_error { }
@@ -1099,7 +1134,8 @@ save_working_tree :: (folder: string, operation: string -> commit: string) [fail
     head := `scratch git_output(folder, "rev-parse", "--verify", "--quiet", "HEAD")
     if head.failed or String.trim(head.text).count == 0 {
         made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", String.trim(tree.text), "-m", message)
-    } else {
+    }
+    else {
         made = git_output(folder, "-c", "user.name=buckram", "-c", "user.email=buckram@localhost", "commit-tree", String.trim(tree.text), "-p", String.trim(head.text), "-m", message)
     }
     if made.failed then fail: failed = made.text
@@ -1148,7 +1184,8 @@ git_output :: (folder: string, .. arguments: string -> result: Git_Output) {
     if code, output, errors, timed_out := System.run_with(⟨folder: folder, timeout: 120⟩, "git", arguments..) {
         result.text = output
         if code != 0 or timed_out then result = ⟨"git «String.join(arguments, " ")»: «String.trim(errors)»", true⟩
-    } else if absent or os_error {
+    }
+    else if absent or os_error {
         result = ⟨"git can't be run", true⟩
     }
 }
@@ -1200,7 +1237,8 @@ read_edit :: (item: Json.Json_Value, k: i64 -> e: Edit, error: string) {
                 return
             }
         }
-    } else {
+    }
+    else {
         error = "edit «k» isn't an object: each is {file, old, new}, with count if not 1"
         return
     }
@@ -1210,11 +1248,13 @@ read_edit :: (item: Json.Json_Value, k: i64 -> e: Edit, error: string) {
                 if name == "file" then e.file = text
                 if name == "old" then e.old = text
                 if name == "new" then e.new = text
-            } else {
+            }
+            else {
                 error = "edit «k»'s «name» isn't text"
                 return
             }
-        } else if absent {
+        }
+        else if absent {
             error = #"edit «k» has no «name»: each edit is {file, old, new}, with count if not 1, and an old of "" makes a new file"#
             return
         }
@@ -1269,13 +1309,15 @@ edit_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
             if at < 0 {
                 if text := File.read_file(path) {
                     files.add(⟨path, text, false⟩)
-                } else if absent {
+                }
+                else if absent {
                     if e.old != "" {
                         tool_result(out, "edit «k + 1»: there's no file «e.file» (nothing was written)", true)
                         return
                     }
                     files.add(⟨path, "", true⟩)
-                } else if os_error {
+                }
+                else if os_error {
                     tool_result(out, "edit «k + 1»: «e.file» can't be read: «os_error» (nothing was written)", true)
                     return
                 }
@@ -1299,10 +1341,12 @@ edit_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
         }
         for f: files {
             if File.write_file(f.path, f.text) {
-            } else if absent {
+            }
+            else if absent {
                 tool_result(out, "«f.path» can't be written (its folder isn't there): the files before it in the list were", true)
                 return
-            } else if os_error {
+            }
+            else if os_error {
                 tool_result(out, "«f.path» can't be written («os_error»): the files before it in the list were", true)
                 return
             }
@@ -1333,9 +1377,11 @@ run_program :: (out: *String.Builder, tool_name: string, options: System.Run_Opt
                 if timed_out then head = "timed out after «seconds_text(options.timeout)»"
                 if said == "" { why_failed = `global String.copy(head) } else { why_failed = `global "«head»: «said»" }
             }
-        } else if absent {
+        }
+        else if absent {
             tool_result(out, "there's no program '«program»' (a path, or a name on the PATH)", true)
-        } else if os_error {
+        }
+        else if os_error {
             tool_result(out, "'«program»' couldn't be run: «os_error»", true)
         }
     }

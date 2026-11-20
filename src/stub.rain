@@ -37,7 +37,8 @@ PROTOCOL :: "2025-06-18"             // the MCP version given when the client as
 INSTRUCTIONS :: "buckram runs programs for you with their arguments as a list, so nothing is quoted, escaped or expanded on the way: a backslash, a $, a % or a quote arrives as you wrote it. Use it instead of a shell. The project's tasks (build, test and the like, from its buckram.json) are tools of their own: prefer one to run when there is one, in a worktree too (give its folder: the task's programs are then the worktree's). When you'll run a command more than once or twice and there's no task for it, add one with add_task: it's a tool of its own from your next call (task runs it by name meanwhile), and it's kept in buckram.json for whoever works here next. Use run for a one-off. Use git, not run, for any of git's commands (give a commit's message as message, as it is: it never goes on a command line): before one that can lose uncommitted work, it saves the working tree as a commit, and one that makes a loss permanent (reflog expire, gc --prune, a forced push) runs only with permanent: true, which needs the user's say-so. Every tool refuses a parameter it doesn't have, or one of the wrong type, and says what it takes. Use edit for several exact replacements that must all happen or none, across one file or many. Each tool gives the exit code, then the output and errors; a program that exits with another code than 0, or runs past its timeout, is an error result. Long output is cut in the middle, and the note where it's cut gives the file that has all of it: read that file for the rest rather than running the program again."
 #if #program.os == .WINDOWS {
     CORE :: "buckram_core.exe"
-} #else {
+}
+#else {
     CORE :: "buckram_core"
     Linux :: #import OS_Linux
 }
@@ -67,10 +68,12 @@ main :: (args: [] string) {
             if given != "" {
                 home = given
                 forget_copy()
-            } else {
+            }
+            else {
                 run_from_copy(args)
             }
-        } else {
+        }
+        else {
             run_from_copy(args)
         }
     }
@@ -78,10 +81,12 @@ main :: (args: [] string) {
     core = File.join_path(home, CORE)
     if args.count > 1 {
         if System.set_current_folder(args[1]) {
-        } else if absent {
+        }
+        else if absent {
             here := `scratch System.current_folder()
             log("there's no folder «args[1]», so it works in «here»")
-        } else if os_error {
+        }
+        else if os_error {
             here := `scratch System.current_folder()
             log("it can't work in «args[1]» («os_error»), so it works in «here»")
         }
@@ -95,7 +100,8 @@ main :: (args: [] string) {
         `message {
             if line := read_line() {
                 handle(line)
-            } else if end_of_input {
+            }
+            else if end_of_input {
                 return
             }
         }
@@ -151,7 +157,8 @@ log :: (text: string) {
 seen :: (path: string -> Seen) {
     if entry := File.file_info(path) {
         return ⟨true, entry.size, entry.modified⟩
-    } else if absent or os_error {
+    }
+    else if absent or os_error {
         return ⟨⟩
     }
 }
@@ -183,7 +190,8 @@ handle :: (line: string) {
                 has_id = true
             }
             if p := Json.member(request, "params") is not absent { params = p }
-        } else if bad_json {
+        }
+        else if bad_json {
             respond_error(Json.Json_Value.none, -32700, "this isn't JSON: «bad_json.why» (at byte «bad_json.at»)")
             return
         }
@@ -203,12 +211,15 @@ handle :: (line: string) {
             answer := String.trim(output)
             if answer.count > 0 {
                 echo(answer)
-            } else {
+            }
+            else {
                 respond_error(id, -32603, "buckram's core gave no answer (it exited with «code»)")
             }
-        } else if absent {
+        }
+        else if absent {
             respond_error(id, -32603, "buckram's core isn't there: «core» (build it beside this, «File.file_name(own_path)»)")
-        } else if os_error {
+        }
+        else if os_error {
             respond_error(id, -32603, "buckram's core couldn't be started: «os_error»")
         }
         if changed() then tools_changed()
