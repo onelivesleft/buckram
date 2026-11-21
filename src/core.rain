@@ -81,7 +81,9 @@
 
 #include "files.rain"
 
-VERSION :: "0.4.0"
+// Its version, from VERSION, as the stub's (installing bumps it).
+VERSION_FILE :: #data "../VERSION"
+VERSION :: String.trim(string'VERSION_FILE[:])
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
 DEFAULT_TIMEOUT : f64 : 600
 // git's commands that only look, or only add to what's kept (add, commit,

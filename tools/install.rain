@@ -1,0 +1,588 @@
+// Installs this buckram where TTS6's team runs it, C:/TTS6/Tools (or --to's
+// folder), as the hud is installed there:
+//
+//     Tools/buckram.exe          the Windows stub, which agents' clients start
+//     Tools/buckram_core.exe     its core, which the stub runs beside it
+//     Tools/buckram-linux        the Linux stub (not buckram: on Windows a
+//                                file can't be named as the folder Buckram is)
+//     Tools/buckram_core         its core, which it runs beside it
+//     Tools/buckram.md           its instructions for agents (AGENTS.md's
+//                                using it and setting it up, naming those)
+//     Tools/Buckram/             its source
+//
+// The builds are release builds, made here first (in build/install). The
+// source is what git tracks here, as it is in this folder (uncommitted
+// changes included: it says if there are any), without bin/ (the debug
+// builds committed for using it from here: the release builds beside it
+// are its programs there) or this installer. Run from buckram's folder:
+//
+//     rain -run tools/install.rain [--minor | --major] [--to C:/TTS6/Tools] [--rain C:/rain/build/rain.exe] [--no-p4] [--dry-run]
+//
+// --dry-run says the version and the changelist's description, and lists
+// what would be put where and what Perforce would open for edit, delete
+// and add, changing nothing (it only asks p4 what it has).
+//
+// Each install is a version of buckram (VERSION, semantic versioning, built
+// into it): first the version's bumped (a patch, or --minor or --major),
+// and CHANGELOG.md's notes under Unreleased made its; then its changelist
+// made, described as buckram and the version, then those notes; then the
+// release builds made, with the version in them. With nothing noted under
+// Unreleased, it won't install. A changelist that already has buckram's
+// files open (an install not yet submitted) is updated instead, and its
+// version kept, since it hasn't gone out: new notes join it.
+//
+// The destination is in Perforce: before anything is copied, what Perforce
+// has there that's replaced is opened for edit, and what's going for
+// delete; after, what's new is added (the Linux programs as executables,
+// binary+x), and what turned out the same as Perforce's is reverted. The
+// changelist is left for you to look over and submit. --no-p4 installs
+// without Perforce (to try it, into a folder of your own).
+//
+// Tools/Buckram is replaced whole. A program that's running (the stub runs
+// as long as its agent's session) can't be written over, but it can be
+// renamed: it goes to buckram.old.exe (Perforce doesn't have it), and the
+// next session starts the new one. Each change to a document must find the
+// text it changes: if one doesn't (the document was rewritten), nothing is
+// installed, and the change here is the thing to update.
+
+#import Console
+#import String
+#import File
+#import System
+
+// What's built: the source, the file it's built as, and its system.
+Build :: struct {
+    source: string
+    out: string
+    os: string
+}
+
+BUILDS :: [] Build⟨
+    ⟨source: "src/stub.rain", out: "build/install/windows/buckram.exe", os: "windows"⟩,
+    ⟨source: "src/core.rain", out: "build/install/windows/buckram_core.exe", os: "windows"⟩,
+    ⟨source: "src/stub.rain", out: "build/install/linux/buckram", os: "linux"⟩,
+    ⟨source: "src/core.rain", out: "build/install/linux/buckram_core", os: "linux"⟩
+⟩
+
+// Left out of Tools/Buckram: a path that starts with one of these.
+LEFT_OUT :: [] string⟨"bin/", "tools/install.", ".gitignore", ".gitattributes"⟩
+
+// A change to a document: its old text, which must be there, made new (the
+// first, or every one).
+Edit :: struct {
+    old: string
+    new: string
+    every: bool = false
+}
+
+// A file the install puts in place: where (in the destination, with /), and
+// what it is: a file of this folder's (from), or text made here; and
+// whether it's a Linux program (an executable to Perforce, binary+x).
+Placed :: struct {
+    path: string
+    from: string = ""
+    text: string = ""
+    linux_program: bool = false
+}
+
+main :: (args: [] string) [failed: string] {
+    *destination := "C:/TTS6/Tools"
+    *rain := "C:/rain/build/rain.exe"
+    *use_p4 := true
+    *dry_run := false
+    *bump := Bump.PATCH
+    for arg, i: args {
+        if arg == "--to" and i + 1 < args.count then destination = args[i + 1]
+        if arg == "--rain" and i + 1 < args.count then rain = args[i + 1]
+        if arg == "--no-p4" then use_p4 = false
+        if arg == "--dry-run" then dry_run = true
+        if arg == "--minor" then bump = .MINOR
+        if arg == "--major" then bump = .MAJOR
+    }
+    if !File.file_exists("src/stub.rain") then fail: failed = "run this from buckram's folder (where src/stub.rain is): rain -run tools/install.rain"
+    if !File.folder_exists(destination) then fail: failed = "there's no folder «destination» to install into"
+
+    //- what's installed, read and changed before anything is built or replaced
+    // (with what's new and not ignored, which a commit hasn't added yet)
+    if listed, tracked, _ := System.run("git", "ls-files", "--cached", "--others", "--exclude-standard") is absent or os_error then fail: failed = "can't run git, to list buckram's files"
+    if listed != 0 then fail: failed = "git ls-files failed: is this buckram's repository?"
+    if status, changed, _ := System.run("git", "status", "--porcelain", "--untracked-files=no") is absent or os_error then fail: failed = "can't run git"
+    if parsed, commit, _ := System.run("git", "rev-parse", "--short", "HEAD") is absent or os_error then fail: failed = "can't run git"
+    head := String.trim(commit)
+
+    if agents := File.read_file("AGENTS.md") is absent or os_error then fail: failed = "can't read AGENTS.md"
+    if readme := File.read_file("README.md") is absent or os_error then fail: failed = "can't read README.md"
+
+    // buckram.md: AGENTS.md's using it and setting it up, naming the programs
+    // beside it, and the source in Buckram/.
+    WORKING_ON :: "\n## Working on buckram\n"
+    if at := String.first_index(agents, WORKING_ON) is absent then fail: failed = "AGENTS.md has no «String.trim(WORKING_ON)» heading: tools/install.rain's buckram.md needs updating"
+    using := "«agents[:at + 1]»## Working on buckram\n\nIts source, building it and its tests: `Buckram/AGENTS.md`.\n"
+    stub := "«destination»/buckram.exe"
+    instructions := [] Edit⟨
+        ⟨old: "This file is for agents: setting buckram up in a project, using\nit, and working on buckram itself. [README.md](README.md) describes it for\npeople.",
+         new: "This file is for agents: setting buckram up in a project, and using\nit. `Buckram/AGENTS.md` is about working on it, and `Buckram/README.md`\ndescribes it for people."⟩,
+        ⟨old: "1. **Nothing to build:** `bin/buckram.exe` and `bin/buckram_core.exe`\n   (Windows), and `bin/buckram` and `bin/buckram_core` (Linux, x86-64),\n   are in the repository (build them again only after changing `src/`;\n   see below).",
+         new: "1. **Nothing to build:** `buckram.exe` and `buckram_core.exe` (Windows),\n   and `buckram-linux` and `buckram_core` (Linux, x86-64), are next to\n   this file."⟩,
+        ⟨old: "c:/repos/buckram/bin/buckram.exe", new: stub, every: true⟩,
+        ⟨old: "On Linux, the command is `bin/buckram` (no `.exe`).", new: "On Linux, the command is `buckram-linux`, next to this file."⟩,
+        ⟨old: "c:/repos/buckram/tools/calls.rain", new: "«destination»/Buckram/tools/calls.rain", every: true⟩
+    ⟩
+    buckram_md := edited(using, "AGENTS.md", instructions)
+    if buckram_md == "" then fail: failed = "AGENTS.md has changed: tools/install.rain's changes to it need updating"
+
+    // Buckram/AGENTS.md and README.md: as they are, saying what this copy is.
+    note := "> This is a copy of buckram's source (github.com/onelivesleft/buckram, at «head»),\n> installed by its tools/install.rain, without bin/: its programs are the\n> release builds beside this folder (../buckram.exe, ../buckram_core.exe,\n> ../buckram-linux, ../buckram_core). Change it there, not here.\n\n"
+    agents_md := edited(agents, "AGENTS.md", [] Edit⟨⟨old: "# Working with buckram\n\n", new: "# Working with buckram\n\n«note»"⟩⟩)
+    if agents_md == "" then fail: failed = "AGENTS.md has changed: tools/install.rain's changes to it need updating"
+    readme_md := edited(readme, "README.md", [] Edit⟨⟨old: "# buckram\n\n", new: "# buckram\n\n«note»"⟩⟩)
+    if readme_md == "" then fail: failed = "README.md has changed: tools/install.rain's changes to it need updating"
+
+    // Everything the install puts in place.
+    folder := File.join_path(destination, "Buckram")
+    exe := File.join_path(destination, "buckram.exe")
+    core := File.join_path(destination, "buckram_core.exe")
+    linux := File.join_path(destination, "buckram-linux")
+    linux_core := File.join_path(destination, "buckram_core")
+    md := File.join_path(destination, "buckram.md")
+    *placed: [..] Placed
+    placed.add(⟨path: exe, from: BUILDS[0].out⟩)
+    placed.add(⟨path: core, from: BUILDS[1].out⟩)
+    placed.add(⟨path: md, text: buckram_md⟩)
+    for path: String.split(tracked, "\n") {
+        if path == "" or left_out(path) then continue
+        to := File.join_path(folder, path)
+        if path == "AGENTS.md" then placed.add(⟨path: to, text: agents_md⟩)
+        else if path == "README.md" then placed.add(⟨path: to, text: readme_md⟩)
+        else placed.add(⟨path: to, from: path⟩)
+    }
+    placed.add(⟨path: linux, from: BUILDS[2].out, linux_program: true⟩)
+    placed.add(⟨path: linux_core, from: BUILDS[3].out, linux_program: true⟩)
+
+    //- what Perforce has there, and so what's opened for edit (replaced),
+    // for delete (going) and for add (new): asked before anything's changed
+    *in_perforce: [..] string       // as keys (key_of)
+    *opened: [..] string
+    *going: [..] string
+    *added: [..] string
+    *programs_opened: [..] string   // the Linux programs, as executables
+    *programs_added: [..] string
+    if use_p4 {
+        `scratch {
+            if said := perforce(destination, ⟨⟩, "have", exe, core, linux, linux_core, md, "«folder»/...") is failed then fail: failed = failed
+            for line: String.split(said, "\n") {
+                if !String.starts_with(line, "info: ") then continue
+                pieces := String.split(line, " - ")
+                there := String.trim(pieces[# - 1])
+                `global in_perforce.add(key_of(there))
+                if !placed_at(placed, key_of(there)) then `global going.add(String.copy(there))
+            }
+        }
+        for p: placed {
+            key := `scratch key_of(p.path)
+            there := has(in_perforce, key)
+            if p.linux_program {
+                if there then programs_opened.add(p.path) else programs_added.add(p.path)
+            }
+            else if there {
+                opened.add(p.path)
+            }
+            else {
+                added.add(p.path)
+            }
+        }
+    }
+    //- the version: bumped for a new changelist (by what's noted under
+    // Unreleased), kept for one that's pending, which hasn't gone out yet
+    if version_text := File.read_file("VERSION") is absent or os_error then fail: failed = "can't read VERSION"
+    current := String.trim(version_text)
+    if major, minor, patch := parse_version(current) is invalid then fail: failed = "VERSION isn't a semantic version (1.2.3): «current»"
+    if log := File.read_file("CHANGELOG.md") is absent or os_error then fail: failed = "can't read CHANGELOG.md"
+    if notes := unreleased_notes(log) is absent then fail: failed = "CHANGELOG.md has no «UNRELEASED» heading, for what's changed"
+    *pending: i64 = 0
+    if use_p4 {
+        if number := pending_changelist(destination, [] string⟨exe, core, linux, linux_core, md, "«folder»/..."⟩) is failed then fail: failed = failed
+        pending = number
+    }
+    *version := current
+    if use_p4 and pending == 0 {
+        if notes == "" then fail: failed = "nothing to release: note what's changed under «UNRELEASED» in CHANGELOG.md"
+        version = bumped(major, minor, patch, bump)
+    }
+    // (--no-p4 installs the version as it is, its notes left where they are)
+    new_log := if use_p4 then released(log, version, notes) else log
+    description := "buckram v«version»\n\n«section_of(new_log, version)»"
+
+    if dry_run {
+        if pending != 0 then echo("v«version», into changelist «pending», which has buckram's files open already (not submitted: its version kept)")
+        else if use_p4 then echo("v«current» bumped to v«version», in a new changelist")
+        else echo("v«version», without Perforce (not bumped)")
+        if use_p4 then echo("its description:\n«description»\n")
+        echo("would install into «destination» (nothing's built or changed: --dry-run):")
+        for p: placed {
+            source := if p.from != "" then p.from else "(made here)"
+            echo("  «p.path»  ←  «source»")
+        }
+        if use_p4 {
+            echo("Perforce would open for edit:")
+            for f: opened { echo("  «f»") }
+            for f: programs_opened { echo("  «f»  (binary+x)") }
+            echo("for delete:")
+            for f: going { echo("  «f»") }
+            echo("for add:")
+            for f: added { echo("  «f»") }
+            for f: programs_added { echo("  «f»  (binary+x)") }
+        }
+        return
+    }
+
+    //- the version written (VERSION, and its notes in CHANGELOG.md), then
+    // the changelist made or its description updated, before the builds,
+    // which build the version in
+    *change := ""
+    if use_p4 {
+        if File.write_file("VERSION", "«version»\n") is absent or os_error then fail: failed = "can't write VERSION"
+        if File.write_file("CHANGELOG.md", new_log) is absent or os_error then fail: failed = "can't write CHANGELOG.md"
+        if number := write_changelist(destination, pending, description) is failed then fail: failed = failed
+        change = "«number»"
+        what := if pending != 0 then "updated" else "made"
+        echo("buckram v«version»: changelist «change» «what»")
+    }
+
+    //- the builds
+    for b: BUILDS {
+        echo("building «b.out»...")
+        if !built(rain, b.source, "-release", "-os:«b.os»", "-out:«b.out»") then fail: failed = "«b.source» didn't build for «b.os»"
+    }
+
+    //- Perforce, before anything's copied: what's replaced opened for edit
+    // (the Linux programs as executables, binary+x, wherever they're synced),
+    // and what's going opened for delete
+    if use_p4 {
+        if opened.count > 0 {
+            if _ := perforce(destination, p4_escaped(opened), "edit", "-c", change) is failed then fail: failed = failed
+        }
+        if programs_opened.count > 0 {
+            if _ := perforce(destination, p4_escaped(programs_opened), "edit", "-c", change, "-t", "binary+x") is failed then fail: failed = failed
+        }
+        if going.count > 0 {
+            if _ := perforce(destination, p4_escaped(going), "delete", "-c", change) is failed then fail: failed = failed
+        }
+        echo("Perforce: changelist «change», «opened.count + programs_opened.count» files opened for edit and «going.count» for delete")
+    }
+
+    //- the programs: each made writable (without Perforce, read-only
+    // perhaps), and a running one renamed aside
+    for path: [] string⟨exe, core, linux, linux_core, md⟩ {
+        if replaceable(path, destination) is failed then fail: failed = failed
+    }
+
+    //- Tools/Buckram, replaced whole
+    if File.folder_exists(folder) {
+        if all := File.all_files(folder) is absent or os_error then fail: failed = "can't list «folder»"
+        for entry: all {
+            if entry.is_folder then continue
+            if File.make_writable(entry.path) is absent or os_error then fail: failed = "can't make «entry.path» writable"
+        }
+        if File.delete_folder(folder, true) is absent or os_error then fail: failed = "can't delete the old «folder» (is something in it open?)"
+    }
+
+    //- what's placed
+    for p: placed {
+        if File.create_folder(File.folder_of(p.path)) is os_error then fail: failed = "can't make the folder for «p.path»"
+        if p.from != "" {
+            if File.copy_file(p.from, p.path) is absent or os_error then fail: failed = "can't copy «p.from» to «p.path»"
+        }
+        else {
+            if File.write_file(p.path, p.text) is absent or os_error then fail: failed = "can't write «p.path»"
+        }
+    }
+
+    //- Perforce, after: what's new added
+    if use_p4 {
+        if added.count > 0 {
+            // (-f: a name with Perforce's wildcards in it is added as it is)
+            if _ := perforce(destination, added, "add", "-f", "-c", change) is failed then fail: failed = failed
+        }
+        if programs_added.count > 0 {
+            if _ := perforce(destination, programs_added, "add", "-f", "-c", change, "-t", "binary+x") is failed then fail: failed = failed
+        }
+        // What's the same as Perforce's needn't be submitted.
+        if _ := perforce(destination, ⟨⟩, "revert", "-a", "-c", change, "«destination»/...") is failed then fail: failed = failed
+        echo("Perforce: «added.count + programs_added.count» files added, and what didn't change reverted, in changelist «change»: look it over, then p4 submit -c «change»")
+    }
+
+    echo("installed buckram v«version» into «destination»: buckram.exe, buckram_core.exe, buckram-linux, buckram_core, buckram.md, and Buckram/ (its source at «head»)")
+    if use_p4 then echo("commit VERSION and CHANGELOG.md here")
+    if String.trim(changed) != "" then echo("(the source has uncommitted changes, installed as they are:\n«String.trim_end(changed)»)")
+}
+
+// Makes a file the install will replace ready for it: writable, and if it's
+// a program that's running (which can't be deleted, but can be renamed),
+// renamed aside to name.old(.exe), for the next start to take the new one.
+replaceable :: (path: string, destination: string) [failed: string] {
+    if !File.file_exists(path) then return
+    if File.make_writable(path) is absent or os_error then fail: failed = "can't make «path» writable"
+    if File.delete_file(path) is {
+        case absent: _
+        case os_error:
+            name := File.file_name(path)
+            extension := File.extension(name)
+            aside_name := if extension == "" then `scratch "«name».old" else `scratch "«File.without_extension(name)».old.«extension»"
+            old := `scratch File.join_path(destination, aside_name)
+            if File.file_exists(old) {
+                if File.make_writable(old) is absent or os_error then fail: failed = "can't make «old» writable"
+                if File.delete_file(old) is absent or os_error then fail: failed = "«path» and «old» are both running: end the sessions using buckram there, and try again"
+            }
+            if File.rename_file(path, old) is absent or os_error then fail: failed = "can't replace «path» (running?) or rename it aside"
+            echo("«path» is running: renamed to «old», for the next start to take the new one")
+    }
+}
+
+// The text with each edit made, or "" if one's old text isn't there (and
+// that one said).
+edited :: (text: string, name: string, edits: [] Edit -> result: string) {
+    *now := text
+    for e: edits {
+        if !String.contains(now, e.old) {
+            echo(.ERROR, "«name» no longer has this text, which tools/install.rain changes:\n«e.old»")
+            result = ""
+            return
+        }
+        times := if e.every then 0 else 1   // (0: every one)
+        now = `scratch String.replace(now, e.old, e.new, times)
+    }
+    result = String.copy(now)
+}
+
+// Whether a tracked file is left out of Tools/Buckram.
+left_out :: (path: string -> bool) {
+    for prefix: LEFT_OUT {
+        if String.starts_with(path, prefix) then return true
+    }
+    return false
+}
+
+// A path as a key to compare by: Windows' paths are the same with / or \,
+// and in any case.
+key_of :: (path: string -> key: string) {
+    key = String.to_lower(`scratch String.replace(String.trim(path), #"\"#, "/"))
+}
+
+has :: (keys: [] string, key: string -> bool) {
+    for k: keys {
+        if k == key then return true
+    }
+    return false
+}
+
+// Whether the install puts a file at the path with that key.
+placed_at :: (placed: [] Placed, key: string -> bool) {
+    #with scratch.rewind()
+    for p: placed {
+        if `scratch key_of(p.path) == key then return true
+    }
+    return false
+}
+
+// Runs p4 in folder, with -s (so each line says what it is: info, warning,
+// error) and the files as its input (-x -, one a line), and gives what it
+// said. Any error is a failure, but have's "not on client" (Perforce has
+// none of them there).
+perforce :: (folder: string, files: [] string, .. command: string -> said: string) [failed: string] {
+    *arguments: [..] string
+    `scratch arguments.add("-s")
+    if files.count > 0 {
+        `scratch arguments.add("-x")
+        `scratch arguments.add("-")
+    }
+    for c: command { `scratch arguments.add(c) }
+    *input: String.Builder
+    for f: files { input.add(f, "\n") }
+    given := `scratch input.build_and_reset()
+    if code, output, errors, _ := System.run_with(⟨folder: folder, input: given⟩, "p4", arguments..) is absent or os_error {
+        fail: failed = "can't run p4 (is Perforce installed? --no-p4 installs without it)"
+    }
+    for line: String.split(output, "\n") {
+        if !String.starts_with(line, "error: ") then continue
+        if String.contains(line, "not on client") or String.contains(line, "no such file") or String.contains(line, "not opened") then continue
+        fail: failed = "p4 «String.join(command, " ")»: «String.trim(line)»"
+    }
+    if errors != "" and !String.contains(output, "exit: 0") then fail: failed = "p4 «String.join(command, " ")»: «String.trim(errors)»"
+    // (Some refusals are info lines, an ignored file's add for one: the exit code tells. have's and
+    // opened's is 1 when Perforce has none of the files, or none are open, which is fine.)
+    if command.count > 0 and command[0] != "have" and command[0] != "opened" and !String.contains(output, "exit: 0") then fail: failed = "p4 «String.join(command, " ")» failed:\n«String.trim(output)»"
+    said = output
+}
+
+// Paths as Perforce reads them in any command but add -f: its wildcards and
+// revision marks (% first, then @ # *) written as %xx, so a file named with
+// one is that file, not a revision of another.
+p4_escaped :: (paths: [] string -> escaped: [] string) {
+    *list: [paths.count] string in #arena
+    for path, i: paths {
+        *p := `scratch String.replace(path, "%", "%25")
+        p = `scratch String.replace(p, "@", "%40")
+        p = `scratch String.replace(p, "#", "%23")
+        list[i] = String.replace(p, "*", "%2A")
+    }
+    escaped = list
+}
+
+// The changelist the paths are open in, or 0 if none are: one an install
+// made and left to be submitted. Some open in the default changelist, or in
+// two, is a failure (they're to be sorted out by hand first).
+pending_changelist :: (folder: string, paths: [] string -> number: i64) [failed: string] {
+    number = 0
+    `scratch {
+        if said := perforce(folder, paths, "opened") is failed then fail: failed = failed
+        for line: String.split(said, "\n") {
+            if !String.starts_with(line, "info: ") then continue
+            // "info: //TTS/main/Tools/buckram.exe#3 - edit change 17365 (binary+x)", or "... - edit default change (text)"
+            if String.contains(line, " default change ") then fail: failed = "some of buckram's files are open in the default changelist: move them to one (p4 reopen -c N) or revert them, then install again:\n«line»"
+            if at := String.first_index(line, " change ") is absent then continue
+            words := String.split(line[at + 8:], " ")
+            if n := String.to_i64(words[0]) is invalid or too_big then fail: failed = "p4 opened said: «line»"
+            if number != 0 and n != number then fail: failed = "buckram's files are open in changelists «number» and «n»: put them in one (p4 reopen -c N), then install again"
+            number = n
+        }
+    }
+}
+
+// Writes a changelist's description, a new one's (number 0) or that one's:
+// its number. A new one's Files (what the default changelist has open) are
+// left out, so they stay there; an existing one's are kept. (What p4 says
+// is in scratch, which lasts as long as the caller's does.)
+write_changelist :: (folder: string, existing: i64, description: string -> number: i64) [failed: string] {
+    number = 0
+    `scratch {
+        *asking: [..] string
+        asking.add("change")
+        asking.add("-o")
+        if existing != 0 then asking.add("«existing»")
+        if got, spec, problem, _ := System.run_with(⟨folder: folder⟩, "p4", asking..) is absent or os_error {
+            fail: failed = "can't run p4 (is Perforce installed? --no-p4 installs without it)"
+        }
+        if got != 0 then fail: failed = "p4 change -o: «String.trim(problem)»"
+        *form: String.Builder
+        *in_description := false
+        *found := false
+        for raw: String.split(spec, "\n") {
+            line := String.trim_end(raw, "\r")    // (p4's lines end \r\n on Windows; a blank line of the description is a tab)
+            if in_description and String.starts_with(line, "\t") then continue       // the old description's lines
+            in_description = false
+            if line == "Files:" and existing == 0 then break
+            form.add(line, "\n")
+            if line == "Description:" {
+                found = true
+                in_description = true
+                for given: String.split(description, "\n") {
+                    form.add("\t", given, "\n")
+                }
+            }
+        }
+        if !found then fail: failed = "p4 change -o gave a form without a Description:\n«spec»"
+        if made, said, trouble, _ := System.run_with(⟨folder: folder, input: form.build_and_reset()⟩, "p4", "change", "-i") is absent or os_error then fail: failed = "can't run p4"
+        if made != 0 then fail: failed = "p4 change -i: «String.trim(trouble)»"
+        // "Change 12345 created." or "Change 12345 updated."
+        words := String.split(String.trim(said), " ")
+        if words.count < 2 or words[0] != "Change" then fail: failed = "p4 change -i said: «said»"
+        if n := String.to_i64(words[1]) is invalid or too_big then fail: failed = "p4 change -i said: «said»"
+        number = n
+    }
+}
+
+//- the version and its notes
+
+Bump :: enum { PATCH; MINOR; MAJOR }
+
+UNRELEASED :: "## Unreleased"
+
+parse_version :: (text: string -> major: i64, minor: i64, patch: i64) [invalid] {
+    #with scratch.rewind()
+    parts := `scratch String.split(text, ".")
+    if parts.count != 3 then fail: invalid
+    if a := String.to_i64(parts[0]) is invalid or too_big then fail: invalid
+    if b := String.to_i64(parts[1]) is invalid or too_big then fail: invalid
+    if c := String.to_i64(parts[2]) is invalid or too_big then fail: invalid
+    major = a
+    minor = b
+    patch = c
+}
+
+bumped :: (major: i64, minor: i64, patch: i64, bump: Bump -> string) {
+    return if bump is {
+        case .MAJOR: "«major + 1».0.0"
+        case .MINOR: "«major».«minor + 1».0"
+        case: "«major».«minor».«patch + 1»"
+    }
+}
+
+// Where a heading's section is in the log: from its line's start to the next
+// heading's (or the end), as byte places; absent if it hasn't the heading.
+section_at :: (log: string, heading: string -> from: i64, to: i64) [absent] {
+    #with scratch.rewind()
+    line := `scratch "\n«heading»\n"
+    *at: i64 = 0
+    if String.starts_with(log, line[1:]) {
+        at = 0
+    }
+    else if found := String.first_index(log, line) is absent {
+        fail: absent
+    }
+    else {
+        at = found + 1
+    }
+    from = at
+    if next := String.first_index(log, "\n## ", at + heading.count) is absent then to = log.count else to = next + 1
+}
+
+// What's noted under Unreleased, without its blank lines around.
+unreleased_notes :: (log: string -> notes: string) [absent] {
+    if from, to := section_at(log, UNRELEASED) is absent then fail: absent
+    notes = String.trim(log[from + UNRELEASED.count:to])
+}
+
+// What version's section holds, without its heading.
+section_of :: (log: string, version: string -> string) {
+    #with scratch.rewind()
+    heading := `scratch "## v«version»"
+    if from, to := section_at(log, heading) is absent then return ""
+    return String.trim(log[from + heading.count:to])
+}
+
+// The log with Unreleased's notes made version's: under a new heading for
+// it after Unreleased, or added to its section if it has one (a pending
+// changelist's version). With no notes, the log as it is.
+released :: (log: string, version: string, notes: string -> result: string) {
+    if notes == "" then return log
+    if from, to := section_at(log, UNRELEASED) is absent then return log
+    before := log[:from + UNRELEASED.count]
+    rest := log[to:]
+    heading := `scratch "## v«version»"
+    if String.starts_with(rest, "«heading»\n") {
+        if inner_from, inner_to := section_at(rest, heading) is absent then return log
+        kept := String.trim_end(rest[:inner_to])
+        result = "«before»\n\n«kept»\n«notes»\n\n«rest[inner_to:]»"
+    }
+    else {
+        result = "«before»\n\n«heading»\n\n«notes»\n\n«rest»"
+    }
+    result = String.trim_end(result)
+    result = "«result»\n"
+}
+
+// Runs the compiler: whether it built (what it said, if it didn't).
+built :: (rain: string, .. arguments: string -> bool) {
+    #with scratch.rewind()
+    *worked := false
+    `scratch {
+        if code, output, errors := System.run(rain, arguments..) {
+            if code == 0 then worked = true else echo(.ERROR, "«output»«errors»")
+        }
+        else if absent or os_error {
+            echo(.ERROR, "can't run «rain»")
+        }
+    }
+    return worked
+}

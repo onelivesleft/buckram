@@ -181,6 +181,11 @@ so one in use is moved into `bin/old_exes` first, and runs on from there;
 those no longer running are cleared out the next time. Commit the new
 programs with the sources.
 
+Its version is `VERSION`, built in (MCP's `serverInfo` gives it), and
+`CHANGELOG.md` says what each version changed. `tools/install.rain`
+installs a version into TTS6's `Tools` folder through Perforce, release
+builds and the source both (AGENTS.md says how).
+
 It speaks MCP over standard input and output, a JSON-RPC message a line,
 and writes only those there; what it has to say otherwise goes to
 standard error.

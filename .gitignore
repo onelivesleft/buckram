@@ -4,6 +4,7 @@
 # and scratch.
 /*.exe
 tools/*.exe
+src/*.exe
 *.rdi
 bin/old_exes/
 *.obj

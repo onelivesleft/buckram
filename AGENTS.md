@@ -193,4 +193,24 @@ A tool's result is an error when its program exits with a code other than
   folder's `/mnt/c/...` path, and `input` the session.
 - **Its standard output is only protocol messages,** one a line; anything
   else goes to standard error.
+- **Versions:** buckram's version is `VERSION` (semantic versioning), built
+  into both programs (`#data`): MCP's `serverInfo` gives it. Note each
+  change you make under `## Unreleased` in `CHANGELOG.md`, a line each.
+- **TTS6's copy** (`C:\TTS6\Tools`: `buckram.exe`, `buckram_core.exe`,
+  `buckram-linux`, `buckram_core`, `buckram.md` and the source in
+  `Buckram\`) is installed by [tools/install.rain](tools/install.rain), run
+  from here (try `--dry-run` first): `rain -run tools/install.rain` for a
+  patch (0.4.1), `--minor` or `--major` for those. It bumps `VERSION`,
+  makes Unreleased's notes the new version's, makes a Perforce changelist
+  described as `buckram v0.4.1` and those notes, builds the release builds
+  (in `build/install/`), and copies them and the source in, the files
+  checked out first; a stub that's running is renamed aside to
+  `buckram.old.exe`. `buckram.md` is this file's first two sections, naming
+  the programs beside it. It leaves the changelist for you to submit;
+  installing again before then updates it and keeps its version. Commit
+  `VERSION` and `CHANGELOG.md` after. `--no-p4 --to <folder>` tries it in
+  a folder of your own. The rest is in its opening comment, and its tests
+  are `rain -test:tools/install.rain`. The install changes text in this
+  file's first two sections (the paths of `bin/`'s programs): if it says
+  the text it changes isn't there, update its edits.
 - **Files are LF only** (`.gitattributes` makes sure): 'rain rejects a CR.
