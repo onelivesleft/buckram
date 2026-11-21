@@ -511,10 +511,10 @@ parse_version :: (text: string -> major: i64, minor: i64, patch: i64) [invalid] 
 }
 
 bumped :: (major: i64, minor: i64, patch: i64, bump: Bump -> string) {
-    return if bump is {
+    return if #all bump is {
         case .MAJOR: "«major + 1».0.0"
         case .MINOR: "«major».«minor + 1».0"
-        case: "«major».«minor».«patch + 1»"
+        case .PATCH: "«major».«minor».«patch + 1»"
     }
 }
 
