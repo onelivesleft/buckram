@@ -12,6 +12,8 @@ changelist is submitted keeps its version, and adds any new notes to it.
 
 ## Unreleased
 
+## v0.4.1
+
 - A task's arguments can be `"joined"`: the first joined to its run's last piece (`-test:` given `String` runs `-test:String`).
 - git: a commit whose arguments give its message (`--amend --no-edit`, `-C <commit>`, `--fixup=<commit>`, `-F <file>`) needs no `message`.
 - A timeout of one second says "1 second", in the result, the log and the task descriptions.
