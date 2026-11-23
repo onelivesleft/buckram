@@ -12,6 +12,8 @@ changelist is submitted keeps its version, and adds any new notes to it.
 
 ## Unreleased
 
+- `tools/calls.rain` reads its command line through 'rain's Arguments module: the same `[paths] [-since:<time>]`, with `-help`, and the nearest option for a misspelt one.
+
 ## v0.4.1
 
 - A task's arguments can be `"joined"`: the first joined to its run's last piece (`-test:` given `String` runs `-test:String`).

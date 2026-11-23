@@ -9,6 +9,7 @@
 // A path is a log, or a folder whose calls.*.jsonl are read (build/buckram,
 // in the project's folder, by default). -since: leaves out calls before
 // then (a time as the log writes them, or the start of one: a day, say).
+// -help says so.
 
 #import Console
 #import File
@@ -16,6 +17,7 @@
 #import String
 #import Table
 #import Array
+#import Arguments
 
 Stat :: struct {
     name: string
@@ -246,19 +248,24 @@ add_logs :: (path: string, logs: *[..] string) {
     `global logs.add(`global String.copy(path))
 }
 
+Options :: struct {
+    paths: [..] string    ⟦positional, help: "logs, or folders whose calls.*.jsonl are read (build/buckram by default)"⟧
+    since: string         ⟦help: "leaves out calls before then: a time as the log writes them, or its start (a day: 2026-11-14)"⟧
+}
+
 main :: (args: [] string) [usage: string] {
     *totals: Totals
     *logs: [..] string
-    for arg: args[1:] {
-        if arg.starts_with("-since:") {
-            totals.since = arg["-since:".count:]
-        }
-        else if arg.starts_with("-") {
-            fail: usage = "calls.rain takes logs, or folders of them, and -since:<time>, not «arg»"
-        }
-        else {
-            add_logs(arg, logs)
-        }
+    if options := args.parse(Options, "Sums up buckram's call logs.") {
+        totals.since = options.since
+        for path: options.paths { add_logs(path, logs) }
+    }
+    else if help {
+        write(help)
+        return
+    }
+    else if bad_arguments {
+        fail: usage = bad_arguments
     }
     if logs.count == 0 then add_logs("build/buckram", logs)
     if logs.count == 0 { fail: usage = "there are no logs in build/buckram: give a log, or a folder of them" }
