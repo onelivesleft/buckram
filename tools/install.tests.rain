@@ -4,7 +4,7 @@ LOG :: "# buckram's changes\n\nAbout it.\n\n## Unreleased\n\nA new tool\nA fix\n
 
 // Perforce's own characters in a path, written as it reads them.
 paths_are_escaped_for_p4 :: () #test {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         got := p4_escaped([] string⟨"C:/Tools/Buckram/a@b/c.rain", "C:/x/100%#1*.txt", "C:/plain.md"⟩)
         assert(got[0] == "C:/Tools/Buckram/a%40b/c.rain", got[0])
@@ -30,7 +30,7 @@ versions_are_read_and_bumped :: () #test {
 // Unreleased's notes become the new version's section, under a heading of
 // its own after Unreleased, which is left empty.
 notes_become_the_versions :: () #test {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         if notes := unreleased_notes(LOG) is absent {
             assert(false, "it has Unreleased")
@@ -53,7 +53,7 @@ notes_become_the_versions :: () #test {
 // Installing again into a pending changelist: new notes join its version's
 // section; with none, the log is as it was.
 notes_join_a_pending_version :: () #test {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         pending := "## Unreleased\n\nAnother fix\n\n## v0.4.1\n\nA fix\n\n## v0.4.0\n\nThe first\n"
         log := released(pending, "0.4.1", "Another fix")

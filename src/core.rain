@@ -342,7 +342,7 @@ texts_member :: (value: Json.Json_Value, name: string -> [] string) {
 //- the protocol: JSON-RPC 2.0, a message a line
 
 handle :: (line: string) {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         if String.trim(line).count == 0 then return
         if request := Json.parse_json(line) {
@@ -379,7 +379,7 @@ handle :: (line: string) {
 }
 
 respond :: (id: Json.Json_Value, result: string) {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         *out: String.Builder
         out.add(#"{"jsonrpc":"2.0","id":"#)
@@ -390,7 +390,7 @@ respond :: (id: Json.Json_Value, result: string) {
 }
 
 respond_error :: (id: Json.Json_Value, code: i64, message: string) {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         *out: String.Builder
         out.add(#"{"jsonrpc":"2.0","id":"#)

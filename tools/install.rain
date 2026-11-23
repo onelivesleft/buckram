@@ -378,7 +378,7 @@ has :: (keys: [] string, key: string -> bool) {
 
 // Whether the install puts a file at the path with that key.
 placed_at :: (placed: [] Placed, key: string -> bool) {
-    #with scratch.rewind()
+    with scratch.rewind()
     for p: placed {
         if `scratch key_of(p.path) == key then return true
     }
@@ -499,7 +499,7 @@ Bump :: enum { PATCH; MINOR; MAJOR }
 UNRELEASED :: "## Unreleased"
 
 parse_version :: (text: string -> major: i64, minor: i64, patch: i64) [invalid] {
-    #with scratch.rewind()
+    with scratch.rewind()
     parts := `scratch String.split(text, ".")
     if parts.count != 3 then fail: invalid
     if a := String.to_i64(parts[0]) is invalid or too_big then fail: invalid
@@ -521,7 +521,7 @@ bumped :: (major: i64, minor: i64, patch: i64, bump: Bump -> string) {
 // Where a heading's section is in the log: from its line's start to the next
 // heading's (or the end), as byte places; absent if it hasn't the heading.
 section_at :: (log: string, heading: string -> from: i64, to: i64) [absent] {
-    #with scratch.rewind()
+    with scratch.rewind()
     line := `scratch "\n«heading»\n"
     *at: i64 = 0
     if String.starts_with(log, line[1:]) {
@@ -545,7 +545,7 @@ unreleased_notes :: (log: string -> notes: string) [absent] {
 
 // What version's section holds, without its heading.
 section_of :: (log: string, version: string -> string) {
-    #with scratch.rewind()
+    with scratch.rewind()
     heading := `scratch "## v«version»"
     if from, to := section_at(log, heading) is absent then return ""
     return String.trim(log[from + heading.count:to])
@@ -574,7 +574,7 @@ released :: (log: string, version: string, notes: string -> result: string) {
 
 // Runs the compiler: whether it built (what it said, if it didn't).
 built :: (rain: string, .. arguments: string -> bool) {
-    #with scratch.rewind()
+    with scratch.rewind()
     *worked := false
     `scratch {
         if code, output, errors := System.run(rain, arguments..) {

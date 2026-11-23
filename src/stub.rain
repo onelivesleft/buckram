@@ -120,7 +120,7 @@ log :: (text: string) {
     // its place, with BUCKRAM_HOME saying where the core is; if any of it
     // fails, it runs on as it is.
     run_from_copy :: (args: [] string) {
-        #with scratch.rewind()
+        with scratch.rewind()
         `scratch {
             *original := ""
             if path := Linux.executable_path() { original = path } else if os_error { return }
@@ -177,7 +177,7 @@ changed :: (-> bool) {
 }
 
 handle :: (line: string) {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         if String.trim(line).count == 0 then return
         *method := ""
@@ -234,7 +234,7 @@ tools_changed :: () {
 }
 
 initialize :: (id: Json.Json_Value, params: Json.Json_Value) {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         *version := PROTOCOL
         if given := Json.member(params, "protocolVersion") is not absent {
@@ -253,7 +253,7 @@ initialize :: (id: Json.Json_Value, params: Json.Json_Value) {
 }
 
 respond_error :: (id: Json.Json_Value, code: i64, message: string) {
-    #with scratch.rewind()
+    with scratch.rewind()
     `scratch {
         *out: String.Builder
         out.add(#"{"jsonrpc":"2.0","id":"#)
