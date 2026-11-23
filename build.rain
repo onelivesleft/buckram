@@ -62,7 +62,7 @@ build_one :: (compiler: string, here: string, old: string, source: string, exe: 
             }
         }
         else if absent {
-            fail: failed = "there's no compiler '«compiler»': give its path, build.exe C:/rain/build/rain.exe"
+            fail: failed = "there's no compiler '«compiler»': give its path, build.exe C:/rain/bin/rain.exe"
         }
         else if os_error {
             fail: failed = "the compiler couldn't be run («os_error»)"

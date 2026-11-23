@@ -16,7 +16,7 @@
 // builds committed for using it from here: the release builds beside it
 // are its programs there) or this installer. Run from buckram's folder:
 //
-//     rain -run tools/install.rain [--minor | --major] [--to C:/TTS6/Tools] [--rain C:/rain/build/rain.exe] [--no-p4] [--dry-run]
+//     rain -run tools/install.rain [--minor | --major] [--to C:/TTS6/Tools] [--rain C:/rain/bin/rain.exe] [--no-p4] [--dry-run]
 //
 // --dry-run says the version and the changelist's description, and lists
 // what would be put where and what Perforce would open for edit, delete
@@ -87,7 +87,7 @@ Placed :: struct {
 
 main :: (args: [] string) [failed: string] {
     *destination := "C:/TTS6/Tools"
-    *rain := "C:/rain/build/rain.exe"
+    *rain := "C:/rain/bin/rain.exe"
     *use_p4 := true
     *dry_run := false
     *bump := Bump.PATCH
