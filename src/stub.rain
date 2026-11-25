@@ -50,7 +50,7 @@ INSTRUCTIONS :: "buckram runs programs for you with their arguments as a list, s
 Seen :: struct {
     there: bool
     size: u64
-    modified: Time.Apollo_Time
+    modified: Time.Timestamp
 }
 
 own_path: string                     // this program's

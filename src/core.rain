@@ -411,8 +411,8 @@ FOLDER_NOTE :: "It runs in the project's folder, or in folder (a worktree, say: 
 list_tools :: (out: *String.Builder) {
     `scratch {
         out.add(#"{"tools":["#)
-        tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, and a timeout in seconds (600 by default; it ends what the program started too). Gives its exit code, output and errors. Not git: that's the git tool's.",
-             #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"timeout":{"type":"number"}},"required":["program"]}"#)
+        tool(out, "run", "Runs a program and waits for it: the program (a path, or a name on the PATH), its arguments as a list (each arrives exactly as given), and if wanted the folder it starts in (the project's by default), its standard input, its environment variables (an object of names and values, over buckram's own for this program alone: a value of null removes one; for a program that reads its settings only from them, not for switches a command line can give), and a timeout in seconds (600 by default; it ends what the program started too). Gives its exit code, output and errors. Not git: that's the git tool's.",
+             #"{"type":"object","properties":{"program":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"folder":{"type":"string"},"input":{"type":"string"},"environment":{"type":"object","additionalProperties":{"type":["string","null"]}},"timeout":{"type":"number"}},"required":["program"]}"#)
         out.add(",")
         tool(out, "git", #"Runs any of git's commands (operation: status, diff, log, add, commit, checkout, reset, rebase, stash...) with more arguments as a list, in the project or in folder. A commit takes its message as message (given to git as its input, never on a command line), unless its arguments give one (--amend --no-edit, -C <commit>, --fixup=<commit>, -F <file>). Before a command that can lose uncommitted work (checkout, reset, restore, stash, clean, rebase...), the working tree is saved as a commit, untracked files too (but not ignored ones), without touching it or the index, and the result begins with the commit, from which `git restore --source=<commit> -- <path>` brings a file back (they're kept as refs/buckram/saved/* for 30 days). One that makes a loss permanent (reflog expire or delete, gc --prune, prune, a forced push or a deleted remote branch) runs only with "permanent": true: ask the user first."#,
              #"{"type":"object","properties":{"operation":{"type":"string"},"arguments":«ARGUMENTS_SCHEMA»,"message":{"type":"string"},"folder":{"type":"string"},"permanent":{"type":"boolean"}},"required":["operation"]}"#)
@@ -469,7 +469,7 @@ tool :: (out: *String.Builder, name: string, description: string, schema: string
 }
 
 call_tool :: (out: *String.Builder, params: Json.Json_Value) {
-    start := Time.current_time_monotonic()
+    start := Time.instant()
     name := text_member(params, "name")
     *arguments: Json.Json_Value
     if given := Json.member(params, "arguments") is not absent { arguments = given }
@@ -477,23 +477,22 @@ call_tool :: (out: *String.Builder, params: Json.Json_Value) {
     *answer: String.Builder
     call_named_tool(answer, name, arguments)
     result := `scratch answer.build_and_reset()
-    record_call(name, arguments, Time.current_time_monotonic() - start, result)
+    record_call(name, arguments, Time.since(start), result)
     out.add(result)
 }
 
 ERROR_RESULT_END :: #""isError":true}"#
 
 // The call's line in output_folder/calls.<machine>.jsonl.
-record_call :: (name: string, arguments: Json.Json_Value, took: Time.Apollo_Time, result: string) {
+record_call :: (name: string, arguments: Json.Json_Value, took: Time.Duration, result: string) {
     `scratch {
         folder := File.join_path(config.folder, config.output_folder)
         if !File.folder_exists(folder) { if File.create_folder(folder) is os_error { } }
-        *ms: i64 = 0
-        if m := Time.to_milliseconds(took, true) { ms = m } else if too_big { }
+        ms := took.whole_milliseconds()
         *line: String.Builder
         line.add(#"{"time":"#)
-        now := Time.current_time_consensus()
-        Json.write_json_text(line, "«now»")
+        now := Time.now().utc().format("YYYY-MM-DDTHH:mm:ss.SSSZ")
+        Json.write_json_text(line, now)
         line.add(#","tool":"#)
         Json.write_json_text(line, name)
         line.add(#","arguments":"#)
@@ -512,7 +511,7 @@ record_call :: (name: string, arguments: Json.Json_Value, took: Time.Apollo_Time
 call_named_tool :: (out: *String.Builder, name: string, arguments: Json.Json_Value) {
     // Each tool's parameters: one it hasn't is refused, rather than
     // dropped without a word.
-    if name == "run" { if takes_only(out, name, arguments, "program:text arguments:texts folder:text input:text timeout:seconds") then run_tool(out, arguments); return }
+    if name == "run" { if takes_only(out, name, arguments, "program:text arguments:texts folder:text input:text environment:variables timeout:seconds") then run_tool(out, arguments); return }
     if name == "git" { if takes_only(out, name, arguments, "operation:text command:text arguments:texts message:text folder:text permanent:bool") then git_tool(out, arguments); return }
     if name == "edit" { if takes_only(out, name, arguments, "edits:list") then edit_tool(out, arguments); return }
     if name == "files" { if takes_only(out, name, arguments, "operation:text path:text all:bool from:text to:text paths:texts") then files_tool(out, arguments); return }
@@ -623,6 +622,18 @@ wrong_type :: (value: Json.Json_Value, type: string -> string) {
         }
         if value is text then return #"is a list of text, not «described(value)»: give it as a list, ["«text»"]"#
         return "is a list of text, not «described(value)»"
+    }
+    if type == "variables" {
+        if value is object {
+            for item, i: object.values {
+                variable := object.names[i]
+                if variable.count == 0 or String.contains(variable, "=") then return #"is an object of names and values, and "«variable»" isn't a name: a name is some text, with no = in it"#
+                if item is text or none { continue }
+                return #"is an object of names and values, and «object.names[i]»'s is «described(item)»: give it as text, or null to remove it"#
+            }
+            return ""
+        }
+        return #"is an object of names and values, not «described(value)»: {"NAME": "value"}"#
     }
     if type == "integers" {
         if value is list {
@@ -980,7 +991,26 @@ run_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
         tool_result(out, bad_seconds, true)
         return
     }
-    run_program(out, "run", ⟨folder: folder, input: text_member(arguments, "input"), timeout: timeout⟩, program, texts_member(arguments, "arguments"))
+    run_program(out, "run", ⟨folder: folder, input: text_member(arguments, "input"), timeout: timeout, environment: variables_member(arguments, "environment")⟩,
+                program, texts_member(arguments, "arguments"))
+}
+
+// A member that's an object of names and values, as changes to a program's
+// environment (null: removed), or none.
+variables_member :: (value: Json.Json_Value, name: string -> [] System.Environment_Change) {
+    *changes: [..] System.Environment_Change
+    if found := Json.member(value, name) {
+        if found is object {
+            for item, i: object.values {
+                if item is text { changes.add(⟨object.names[i], text⟩) }
+                else if item is none { changes.add(⟨name: object.names[i], removed: true⟩) }
+            }
+        }
+        return changes
+    }
+    else if absent {
+        return changes
+    }
 }
 
 // Is the program git (git, git.exe, or a path to one)?
@@ -1142,8 +1172,7 @@ save_working_tree :: (folder: string, operation: string -> commit: string) [fail
     }
     if made.failed then fail: failed = made.text
     commit = String.trim(made.text)
-    t := Time.to_calendar(Time.current_time_consensus(), .LOCAL)
-    when := "«t.year»«t.month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»«t.day_of_month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»-«t.hour, ⟨width: 2, pad: "0"⟩»«t.minute, ⟨width: 2, pad: "0"⟩»«t.second, ⟨width: 2, pad: "0"⟩»-«t.millisecond, ⟨width: 3, pad: "0"⟩»"
+    when := `scratch Time.now().local().format("YYYYMMDD-HHmmss-SSS")
     kept := git_output(folder, "update-ref", "refs/buckram/saved/«when»", commit)
     if kept.failed then fail: failed = kept.text
     prune_saved(folder)
@@ -1160,8 +1189,7 @@ prune_saved :: (folder: string) {
     `scratch {
         listed := git_output(folder, "for-each-ref", "--format=%(refname:lstrip=3)", "refs/buckram/saved/")
         if listed.failed then return
-        t := Time.to_calendar(Time.current_time_consensus() - Time.seconds_to_apollo(SAVED_DAYS * 24 * 60 * 60), .LOCAL)
-        cutoff := "«t.year»«t.month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»«t.day_of_month_starting_at_0 + 1, ⟨width: 2, pad: "0"⟩»"
+        cutoff := (Time.now() - Time.days(SAVED_DAYS)).local().format("YYYYMMDD")
         for line: listed.text.split("\n") {
             name := String.trim(line)
             if name.count < 8 then continue

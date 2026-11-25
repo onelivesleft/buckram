@@ -12,6 +12,7 @@ changelist is submitted keeps its version, and adds any new notes to it.
 
 ## Unreleased
 
+- `run` takes `environment`: an object of names and values set for the program alone, over buckram's own (null removes one), through 'rain's new `System.Run_Options.environment`; the call's log line has them, as it has every argument.
 - `tools/calls.rain` reads its command line through 'rain's Arguments module: the same `[paths] [-since:<time>]`, with `-help`, and the nearest option for a misspelt one.
 
 ## v0.4.1

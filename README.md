@@ -19,8 +19,9 @@ runs as it is downloaded: nothing needs building first.
 ## Tools
 
 - **run**: a program (a path, or a name on the PATH), its arguments as a
-  list, and if wanted the folder it starts in, its standard input and a
-  timeout (600 seconds by default). A timeout ends what the program started
+  list, and if wanted the folder it starts in, its standard input, its
+  environment variables (an object of names and values over buckram's own,
+  for it alone; null removes one) and a timeout (600 seconds by default). A timeout ends what the program started
   too (on Windows, it runs in a job object of its own). git isn't run here,
   but by the git tool.
 - **git**: any of git's commands (`operation`), with more arguments as a

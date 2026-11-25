@@ -24,8 +24,12 @@ do; in short:
   takes one out. A task's name is letters, digits and `_`.
 - **`run` for a one-off**: a program (a path, or a name on the PATH), its
   arguments as a list, and if needed `folder`, `input` (all of its
-  standard input) and `timeout` (seconds, 600 by default; it ends what the
-  program started too). A task takes a `timeout` too, for one call. Not
+  standard input), `environment` (an object of names and values over
+  buckram's own, for that program alone; `null` removes one: for a program
+  that reads its settings only from them, such as `RAIN_BUILD_FOLDER` or
+  `VK_INSTANCE_LAYERS`, not switches a command line can give) and
+  `timeout` (seconds, 600 by default; it ends what the program started
+  too). A task takes a `timeout` too, for one call. Not
   for git: `run` refuses it.
 - **`git`** for any of git's commands: `operation` (`status`, `diff`,
   `log`, `add`, `commit`, `checkout`, `stash`, ...), more arguments as a
