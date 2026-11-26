@@ -73,7 +73,7 @@ list_files :: (out: *String.Builder, arguments: Json.Json_Value) {
     }
 }
 
-// A folder's entries, or with everything all beneath it.
+// A folder's entries, or with `everything` all beneath it.
 entries_of :: (folder: string, everything: bool -> entries: [] File.Entry) [absent, os_error: File.System_Error] {
     entries = ⟨⟩
     if everything {
@@ -158,7 +158,7 @@ set_aside_note :: (aside: string -> string) #pure {
 // that fails too, it's put back. Those in old_exes no longer in use are
 // cleared out as another goes there.
 
-// The file copied to to: where what was there went ("" if it stayed).
+// The file copied to `to`: where what was there went ("" if it stayed).
 copy_over :: (from: string, to: string -> aside: string) [absent, os_error: File.System_Error] {
     aside = ""
     clear_read_only(to)
@@ -181,7 +181,7 @@ copy_over :: (from: string, to: string -> aside: string) [absent, os_error: File
     }
 }
 
-// The file or folder moved to to: the same.
+// The file or folder moved to `to`: the same.
 move_over :: (from: string, to: string -> aside: string) [absent, os_error: File.System_Error] {
     aside = ""
     if File.rename_file(from, to) is {
@@ -478,7 +478,7 @@ processes_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
     EXAMPLE_PROGRAM :: "rain"
 }
 
-// Does the program's name contain the name given (any case)? Any does, for
+// Does the program's name contain the `name` given (any case)? Any does, for
 // none.
 named_like :: (exe_name: string, name: string -> bool) {
     if name == "" then return true

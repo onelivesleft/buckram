@@ -81,7 +81,7 @@
 
 #include "files.rain"
 
-// Its version, from VERSION, as the stub's (installing bumps it).
+// Its version, from `VERSION`, as the stub's (installing bumps it).
 VERSION_FILE :: #data "../VERSION"
 VERSION :: String.trim(string'VERSION_FILE[:])
 PROTOCOL :: "2025-06-18"             // the MCP version given when the client asks for none
@@ -108,8 +108,8 @@ Task :: struct {
 Config :: struct {
     folder: string               // the project's (the one buckram was started in)
     output_limit: i64
-    output_folder: string        // relative to folder
-    machine: string              // this machine and system (dolly-windows), in the names of what's kept in output_folder
+    output_folder: string        // relative to `folder`
+    machine: string              // this machine and system (dolly-windows), in the names of what's kept in `output_folder`
     tasks: [] Task               // those with a command for this system
     elsewhere: [] Elsewhere      // those with commands only for others
 }
@@ -132,7 +132,7 @@ Elsewhere :: struct {
 
 config: Config
 // Why the call's result is an error, for its line in the log ("" if it
-// isn't one): set by tool_result, and by run_program for a program's.
+// isn't one): set by `tool_result`, and by `run_program` for a program's.
 why_failed: string
 WHY_LIMIT :: 240                      // bytes of it kept
 
@@ -214,7 +214,7 @@ load_config :: (-> loaded: Config) {
 
 // A task, with its command for this system: its run is one command for
 // every system (a list), or one for each (an object of "windows" and
-// "linux" lists). One with commands only for others fails with only_for,
+// "linux" lists). One with commands only for others fails with `only_for`,
 // which they are.
 read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: string, only_for: string] {
     task = ⟨⟩
@@ -230,7 +230,7 @@ read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: str
             *systems: String.Builder
             for system, i: object.names {
                 // (built in the global arena: a frame string here would
-                // make the region checks take task to be in the frame too)
+                // make the region checks take `task` to be in the frame too)
                 if system != "windows" and system != "linux" then fail: bad_task = `global #"its run's systems are "windows" and "linux", not "«system»""#
                 given := object.values[i]
                 *pieces: [..] string
@@ -264,7 +264,7 @@ read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: str
     }
 }
 
-// The items, if they're all strings, added to the list.
+// The `items`, if they're all strings, added to the list.
 strings_of :: (items: [] Json.Json_Value, into: *[..] string -> bool) {
     for item: items {
         if item is text { into.add(text) } else { return false }
@@ -305,7 +305,7 @@ elsewhere_names :: (-> string) {
     return names.build_and_reset()
 }
 
-// Why there's no task of the name here: it has commands only for other
+// Why there's no task of the `name` here: it has commands only for other
 // systems, or there's none.
 no_task :: (name: string -> string) {
     for e: config.elsewhere {
@@ -588,7 +588,7 @@ after_colon :: (parameter: string -> string) {
     if at := String.first_index(parameter, ":") { return parameter[at + 1:] } else if absent { return "" }
 }
 
-// What's wrong with a parameter's value for its type ("is text, not the
+// What's wrong with a parameter's `value` for its `type` ("is text, not the
 // number 5"), or "".
 wrong_type :: (value: Json.Json_Value, type: string -> string) {
     if value is none then return ""
@@ -673,7 +673,7 @@ seconds_text :: (seconds: f64 -> string) {
 }
 
 // A number of seconds: given as a number, or a string of one (as agents
-// often give it); the fallback when it isn't given.
+// often give it); the `fallback` when it isn't given.
 seconds_member :: (value: Json.Json_Value, name: string, fallback: f64 -> seconds: f64) [bad_seconds: string] {
     seconds = fallback
     if found := Json.member(value, name) is not absent {
@@ -773,7 +773,7 @@ read_config_file :: (-> value: Json.Json_Value) [bad_config: string] {
     }
 }
 
-// The object with its member of that name set to value (the first of the
+// The object with its member of that name set to `value` (the first of the
 // name replaced, or it added at the end); or, with no value, taken out.
 with_member :: (object: Json.Json_Object, name: string, value: Json.Json_Value, remove: bool -> Json.Json_Object) {
     *names: [..] string
@@ -1122,7 +1122,7 @@ permanent_loss :: (operation: string, extra: [] string -> string) {
 // Saves the working tree as it is (what's changed, and untracked files the
 // .gitignore doesn't leave out) as a commit, refs/buckram/saved/<when>,
 // without touching it or the index: through a copy of the index. Gives the
-// commit, or "" when there's nothing uncommitted to save.
+// `commit`, or "" when there's nothing uncommitted to save.
 save_working_tree :: (folder: string, operation: string -> commit: string) [failed: string] {
     commit = ""
     status := git_output(folder, "status", "--porcelain", "--untracked-files=all")
@@ -1183,7 +1183,7 @@ save_working_tree :: (folder: string, operation: string -> commit: string) [fail
 // past wanting back.
 SAVED_DAYS :: 30
 
-// The saved working trees from before SAVED_DAYS ago, their refs deleted.
+// The saved working trees from before `SAVED_DAYS` ago, their refs deleted.
 // A ref's name is when it was saved (20261113-014057-649), so it's by name.
 prune_saved :: (folder: string) {
     `scratch {
@@ -1202,7 +1202,7 @@ prune_saved :: (folder: string) {
     }
 }
 
-// What a git command printed, and whether it failed (its text then saying
+// What a git command printed, and whether it `failed` (its `text` then saying
 // why).
 Git_Output :: struct {
     text: string
@@ -1234,7 +1234,7 @@ in_project :: (path: string -> string) {
     return File.join_path(config.folder, path)
 }
 
-// Is the path whole (C:/x, /x, or \x), not from a folder?
+// Is the `path` whole (C:/x, /x, or \x), not from a folder?
 is_whole :: (path: string -> bool) {
     if path.count >= 2 and path[1] == ":" then return true
     return String.starts_with(path, "/") or String.starts_with(path, "\\")
@@ -1256,7 +1256,7 @@ Changed :: struct {
 // The kth edit, checked as the tool's own parameters are: its fields known,
 // file, old and new given as text (file not empty; old empty to make a new
 // file), and count, if given, a whole number of times, 1 or more. Gives
-// the error, or "".
+// the `error`, or "".
 read_edit :: (item: Json.Json_Value, k: i64 -> e: Edit, error: string) {
     e = ⟨"", "", "", 1⟩
     error = ""
@@ -1386,7 +1386,7 @@ edit_tool :: (out: *String.Builder, arguments: Json.Json_Value) {
 }
 
 // Runs it, and gives back what happened as the tool's result (after the
-// note, if there is one).
+// `note`, if there is one).
 run_program :: (out: *String.Builder, tool_name: string, options: System.Run_Options, program: string, arguments: [] string, note: string = "") {
     `scratch {
         if code, output, errors, timed_out := System.run_with(options, program, arguments..) {
@@ -1440,7 +1440,7 @@ plural :: (n: i64 -> string) {
 }
 
 // The first line of the text that isn't blank, trimmed, and cut (at a
-// character's start) past WHY_LIMIT bytes; "" if there's none.
+// character's start) past `WHY_LIMIT` bytes; "" if there's none.
 first_line :: (text: string -> string) {
     for line: text.split("\n") {
         trimmed := String.trim(line)

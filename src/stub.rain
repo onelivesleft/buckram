@@ -32,7 +32,7 @@
 #import Json
 #import Time
 
-// Its version (semantic versioning), from VERSION, which installing bumps
+// Its version (semantic versioning), from `VERSION`, which installing bumps
 // (tools/install.rain): MCP's serverInfo gives it.
 VERSION_FILE :: #data "../VERSION"
 VERSION :: String.trim(string'VERSION_FILE[:])
