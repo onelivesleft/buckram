@@ -233,14 +233,20 @@ read_task :: (name: string, value: Json.Json_Value -> task: Task) [bad_task: str
                 // make the region checks take `task` to be in the frame too)
                 if system != "windows" and system != "linux" then fail: bad_task = `global #"its run's systems are "windows" and "linux", not "«system»""#
                 given := object.values[i]
-                *pieces: [..] string
                 *good := false
-                if given is list { good = strings_of(list, pieces) and pieces.count > 0 }
-                if !good then fail: bad_task = `global "its run for «system» is a list of strings, the program first"
-                if system == THIS_SYSTEM {
-                    for piece: pieces { command.add(piece) }
+                if given is list {
+                    if system == THIS_SYSTEM {
+                        before := command.count
+                        good = strings_of(list, command) and command.count > before
+                    }
+                    else {
+                        // (another system's: only checked, so in scratch)
+                        *pieces: [..] string
+                        `scratch { good = strings_of(list, pieces) and pieces.count > 0 }
+                    }
                 }
-                else {
+                if !good then fail: bad_task = `global "its run for «system» is a list of strings, the program first"
+                if system != THIS_SYSTEM {
                     if systems.count > 0 then systems.add(", ")
                     systems.add(system)
                 }
